@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { ArrowLeft, Send, Check, MessageSquare, Info, X, Search, LockKeyhole, ArrowDown, Paperclip, Mic, Pencil, Trash2, SmilePlus, ImageIcon, Film, Bot, Sparkles } from 'lucide-react';
+import { ArrowLeft, Send, Check, MessageSquare, Info, X, Search, LockKeyhole, ArrowDown, Paperclip, Mic, Pencil, Trash2, SmilePlus, ImageIcon, Film, Sparkles } from 'lucide-react';
 import Avatar from './Avatar';
 import AttachmentView from './Attachment';
 import VoiceRecorder from './VoiceRecorder';
@@ -22,7 +22,6 @@ export default function ChatPanel(p: Props) {
   const group = p.conversation.kind === 'group';
   const ready = p.conversation.members.every(m => !!m.identity);
   const peerPresence: Presence = p.presence[p.conversation.peer.id] ?? 'offline';
-  const hasBot = p.conversation.members.some(m => m.username === 'campus_ai');
   const isBotDm = p.conversation.peer.username === 'campus_ai';
 
   useEffect(() => {
@@ -148,6 +147,14 @@ export default function ChatPanel(p: Props) {
     catch (e) { setError(e instanceof Error ? e.message : 'Unable to react.'); }
   }
 
+  const triggerAiInDraft = () => {
+    setDraft(current => {
+      const trimmed = current.trim();
+      if (trimmed.startsWith('@campus_ai') || trimmed.startsWith('@ai')) return current;
+      return `@campus_ai ${current}`.trim() + ' ';
+    });
+  };
+
   const lastOwn = [...p.messages].reverse().find(m => m.senderId === p.user.id && !m.deleted);
   const seenBy = lastOwn ? p.conversation.members.filter(m => m.id !== p.user.id && (m.lastReadId || 0) >= lastOwn.id) : [];
   const nameOf = (id: string) => id === p.user.id ? 'You' : p.conversation.members.find(m => m.id === id)?.name || 'Someone';
@@ -176,10 +183,10 @@ export default function ChatPanel(p: Props) {
 
       <div className="flex h-10 shrink-0 items-center gap-4 border-b border-line px-5 text-xs sm:px-7">
         <span className="flex h-full items-center gap-1.5 border-b-2 border-accent font-semibold"><MessageSquare size={13}/>Messages</span>
-        {group && hasBot && (
-          <span className="flex items-center gap-1 text-[11px] text-accent">
-            <Sparkles size={12}/> Mention <code className="rounded bg-soft px-1 text-[10px]">@campus_ai</code> to ask AI
-          </span>
+        {!isBotDm && (
+          <button onClick={triggerAiInDraft} className="flex items-center gap-1 rounded bg-accent-soft/60 px-2 py-0.5 text-[11px] font-medium text-accent hover:bg-accent-soft">
+            <Sparkles size={12}/> Mention <code className="font-bold">@ai</code> to ask Campus AI
+          </button>
         )}
         <span className="ml-auto flex items-center gap-1 text-[10px] text-muted"><LockKeyhole size={11}/>{ready ? 'Messages and media encrypted' : 'Encryption setup needed'}</span>
       </div>
@@ -214,7 +221,7 @@ export default function ChatPanel(p: Props) {
                 </h3>
                 <p className="mt-1 text-xs text-muted">{group ? `${p.conversation.members.length} members` : `@${p.conversation.peer.username}`}</p>
                 <p className="mt-3 max-w-xl text-[13px] leading-6 text-muted">
-                  {isBotDm ? 'This is your dedicated conversation with Campus AI. Ask project questions, discuss code, or plan study schedules—all end-to-end encrypted.' : group ? `Welcome to ${p.conversation.peer.name}. New messages are encrypted for all ${p.conversation.members.length} members.` : `Your direct conversation with ${p.conversation.peer.name}. New messages are encrypted on your devices.`}
+                  {isBotDm ? 'This is your dedicated conversation with Campus AI. Ask project questions, discuss code, or plan study schedules—all end-to-end encrypted.' : group ? `Welcome to ${p.conversation.peer.name}. You can mention @ai at any time to bring the AI assistant into the discussion.` : `Your direct conversation with ${p.conversation.peer.name}. You can mention @ai here anytime to consult Campus AI.`}
                 </p>
               </div>
             )}
@@ -228,8 +235,8 @@ export default function ChatPanel(p: Props) {
               const showDate = !prev || date.toDateString() !== new Date(prev.createdAt).toDateString();
               const grouped = !query.trim() && !showDate && prev?.senderId === m.senderId && date.getTime() - new Date(prev.createdAt).getTime() < 300000;
               const member = p.conversation.members.find(x => x.id === m.senderId);
-              const author = member || (own ? p.user : {name:'Unknown sender', username: '', avatarUrl: null});
-              const isBot = author.username === 'campus_ai';
+              const author = member || (m.senderId === '00000000-0000-4000-8000-000000000001' ? {name:'Campus AI Companion', username: 'campus_ai', avatarUrl: null} : own ? p.user : {name:'Unknown sender', username: '', avatarUrl: null});
+              const isBot = author.username === 'campus_ai' || m.senderId === '00000000-0000-4000-8000-000000000001';
               const actionable = !m.deleted && !m.legacy && !m.decryptionError && !isBot;
               const isEditing = editing?.id === m.id;
 
@@ -242,7 +249,7 @@ export default function ChatPanel(p: Props) {
                       <span className="h-px flex-1 bg-line"/>
                     </div>
                   )}
-                  <article onClick={e => {if (!(e.target as HTMLElement).closest('button,textarea,audio,video,a')) setSelected(selected === m.id ? null : m.id);}} className={`message-row group relative ${grouped ? 'py-1' : ''} ${isBot ? 'bg-accent-soft/30 dark:bg-accent-soft/10' : ''}`}>
+                  <article onClick={e => {if (!(e.target as HTMLElement).closest('button,textarea,audio,video,a')) setSelected(selected === m.id ? null : m.id);}} className={`message-row group relative ${grouped ? 'py-1' : ''} ${isBot ? 'rounded-lg bg-accent-soft/25 dark:bg-accent-soft/10 mx-2 sm:mx-4 px-3' : ''}`}>
                     {grouped ? (
                       <span className="w-9 shrink-0 pt-1 text-right text-[9px] text-muted">
                         <time dateTime={m.createdAt}>{date.toLocaleTimeString(undefined, {hour: '2-digit', minute: '2-digit', hour12: false})}</time>
@@ -292,7 +299,7 @@ export default function ChatPanel(p: Props) {
                           {m.reactions.map(r => {
                             const mine = r.userIds.includes(p.user.id);
                             return (
-                              <button key={r.emoji} onClick={() => void react(m, r.emoji)} title={r.userIds.map(nameOf).join(', ')} aria-pressed={mine} aria-label={`${r.emoji} ${r.userIds.length}`} className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs ${mine ? 'border-accent bg-accent-soft' : 'border-line bg-soft hover:border-accent'}`}>
+                              <button key={r.emoji} onClick={() => void react(m, r.emoji)} title={r.userIds.map(nameOf).join(', ')} aria-pressed={mine} aria-label={`${r.emoji}${r.userIds.length}`} className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs ${mine ? 'border-accent bg-accent-soft' : 'border-line bg-soft hover:border-accent'}`}>
                                 <span>{r.emoji}</span>
                                 <span className="text-[10px] font-semibold">{r.userIds.length}</span>
                               </button>
@@ -354,13 +361,16 @@ export default function ChatPanel(p: Props) {
                   <button type="button" aria-label="Remove attachment" disabled={busy} onClick={() => setFile(null)}><X size={14}/></button>
                 </div>
               )}
-              <textarea aria-label="Message" placeholder={file ? 'Add a caption (optional)' : isBotDm ? 'Ask Campus AI anything…' : group && hasBot ? `Message ${p.conversation.peer.name} (use @campus_ai to ping AI)` : `Message ${p.conversation.peer.name}`} rows={2} maxLength={MAX_TEXT} disabled={busy} value={draft} onChange={(e) => {setDraft(e.target.value); p.onTyping(p.conversation.id, !!e.target.value.trim());}} onKeyDown={(e) => {if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {e.preventDefault(); void submit(e);}}} className="block max-h-36 min-h-[70px] w-full resize-none bg-transparent px-4 pb-2 pt-3 text-[13px] leading-6"/>
+              <textarea aria-label="Message" placeholder={file ? 'Add a caption (optional)' : isBotDm ? 'Ask Campus AI anything…' : `Message ${p.conversation.peer.name} (type @ai to ask AI)`} rows={2} maxLength={MAX_TEXT} disabled={busy} value={draft} onChange={(e) => {setDraft(e.target.value); p.onTyping(p.conversation.id, !!e.target.value.trim());}} onKeyDown={(e) => {if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {e.preventDefault(); void submit(e);}}} className="block max-h-36 min-h-[70px] w-full resize-none bg-transparent px-4 pb-2 pt-3 text-[13px] leading-6"/>
               <div className="flex items-center justify-between gap-2 px-2 pb-2">
-                <div className="flex items-center gap-0.5">
+                <div className="flex items-center gap-1">
                   <button type="button" aria-label="Attach image, video or audio" title="Attach file (up to 25 MB)" disabled={busy || !ready || !p.connected} className="icon-button h-8 w-8" onClick={() => filePicker.current?.click()}><Paperclip size={17}/></button>
                   <button type="button" aria-label="Record voice note" title="Record voice note" disabled={busy || !ready || !p.connected} className="icon-button h-8 w-8" onClick={() => {setError(''); setRecording(true);}}><Mic size={17}/></button>
-                  {group && hasBot && (
-                    <button type="button" aria-label="Mention AI" title="Mention Campus AI" className="icon-button h-8 w-8 text-accent hover:bg-accent-soft" onClick={() => setDraft(d => d ? `@campus_ai ${d}` : '@campus_ai ')}><Bot size={17}/></button>
+                  {!isBotDm && (
+                    <button type="button" aria-label="Ask Campus AI" title="Ask Campus AI (@ai)" disabled={busy || !ready || !p.connected} className="flex h-8 items-center gap-1.5 rounded-lg border border-accent/30 bg-accent-soft/40 px-2.5 text-xs font-semibold text-accent transition hover:bg-accent-soft" onClick={triggerAiInDraft}>
+                      <Sparkles size={14}/>
+                      <span>Ask AI</span>
+                    </button>
                   )}
                   <input ref={filePicker} type="file" accept="image/*,video/*,audio/*" hidden onChange={e => {choose(e.target.files?.[0]); e.target.value = '';}}/>
                   <span className="ml-1 hidden text-[10px] text-muted sm:inline">{busy && file ? 'Encrypting and uploading…' : draft.length > 0 ? `${draft.length.toLocaleString()} / 2,000` : ''}</span>

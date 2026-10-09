@@ -12,7 +12,7 @@ import { z } from 'zod';
 import { openDatabase } from './db.js';
 import { hashPassword, verifyPassword, publicUser, findSession, createSession, clearSession } from './auth.js';
 import { conversationFor, saveMessage, membersFor, identityInput, viewsFor, editMessage, deleteMessage, reactionsFor, avatarUrl } from './chat.js';
-import { ensureBotIdentity, handleBotTrigger, BOT_USER_ID } from './ai.js';
+import { ensureBotIdentity, handleBotTrigger, BOT_USER_ID, BOT_NAME, BOT_USERNAME } from './ai.js';
 
 import {MAX_GROUP_MEMBERS, MAX_ENCRYPTED_PACKET_BYTES} from '../../shared/limits.js';
 
@@ -23,7 +23,7 @@ export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const AVATAR_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
 const STATUSES = ['online', 'invisible', 'dnd'];
 
-export function createApplication({databasePath = './data/commonroom.sqlite', origins = ['http://localhost:5173'], secureCookie = false, trustProxy = false} = {}) {
+export function createApplication({databasePath = './data/commonroom.sqlite', origins = ['http://localhost:5173', 'http://127.0.0.1:5173'], secureCookie = false, trustProxy = false} = {}) {
   const db = openDatabase(databasePath);
   void ensureBotIdentity(db).catch(console.error);
 
@@ -160,6 +160,21 @@ export function createApplication({databasePath = './data/commonroom.sqlite', or
     const record=db.prepare('SELECT * FROM identities WHERE user_id=?').get(req.user.id);
     res.json({identity:record?{...JSON.parse(record.public_keys),vault:JSON.parse(record.vault)}:null});
   });
+
+  // Dedicated endpoint for clients to get the bot's public identity
+  app.get('/api/bot/identity', requireUser, (req, res) => {
+    const row = db.prepare('SELECT public_keys FROM identities WHERE user_id=?').get(BOT_USER_ID);
+    if (!row) return res.status(404).json({error: 'Bot not ready'});
+    res.json({
+      bot: {
+        id: BOT_USER_ID,
+        name: BOT_NAME,
+        username: BOT_USERNAME,
+        identity: JSON.parse(row.public_keys)
+      }
+    });
+  });
+
   app.post('/api/identity', requireUser, (req,res) => {
     const input=identityInput.parse(req.body);
     const publicKeys={encryptionKey:input.encryptionKey,signingKey:input.signingKey};

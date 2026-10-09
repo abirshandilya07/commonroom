@@ -48,7 +48,6 @@ async function resolveActiveModel(apiKey) {
       const data = await res.json();
       const modelIds = (data.data || []).map(m => m.id);
       
-      // Filter out non-chat models like whisper, guard, and embed
       const chatModels = modelIds.filter(id => 
         !id.includes('guard') && 
         !id.includes('whisper') && 
@@ -126,62 +125,75 @@ async function callLlm(prompt, context = []) {
 }
 
 export async function handleBotTrigger({ db, io, conversationId, message, senderId }) {
-  if (senderId === BOT_USER_ID || !message.encrypted) return;
-
-  const members = membersFor(db, conversationId);
-  const isBotMember = members.some(m => m.id === BOT_USER_ID);
-  if (!isBotMember) return;
-
-  const conversation = db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId);
-  const isDirect = conversation.kind === 'direct';
-
-  if (!botIdentity) await ensureBotIdentity(db);
-
-  let plainText = '';
   try {
-    const sender = members.find(m => m.id === senderId);
-    plainText = await decryptMessage(botIdentity, message, sender.identity);
-  } catch (err) {
-    console.error('Bot failed to decrypt incoming message:', err);
-    return;
+    if (senderId === BOT_USER_ID || !message.encrypted) return;
+
+    const conversation = db.prepare('SELECT * FROM conversations WHERE id=?').get(conversationId);
+    if (!conversation) return;
+
+    const members = membersFor(db, conversationId);
+    const isDirectBot = conversation.kind === 'direct' && members.some(m => m.id === BOT_USER_ID);
+    
+    const encryptedForBot = message.encrypted.recipients.some(r => r.userId === BOT_USER_ID);
+    if (!isDirectBot && !encryptedForBot) return;
+
+    if (!botIdentity) await ensureBotIdentity(db);
+
+    let plainText = '';
+    try {
+      const sender = members.find(m => m.id === senderId);
+      plainText = await decryptMessage(botIdentity, message, sender.identity);
+    } catch (err) {
+      console.error('Bot failed to decrypt incoming message:', err);
+      return;
+    }
+
+    const isMentioned = /(@campus_ai|\/ai\b|@ai\b)/i.test(plainText);
+    if (!isDirectBot && !isMentioned) return;
+
+    const cleanedPrompt = plainText.replace(/(@campus_ai|\/ai|@ai)/gi, '').trim() || 'Hello!';
+
+    const room = (id) => `user:${id}`;
+    io.to(members.map(m => room(m.id))).emit('typing:update', {
+      conversationId,
+      userId: BOT_USER_ID,
+      name: BOT_NAME,
+      typing: true
+    });
+
+    const replyText = await callLlm(cleanedPrompt);
+
+    io.to(members.map(m => room(m.id))).emit('typing:update', {
+      conversationId,
+      userId: BOT_USER_ID,
+      name: BOT_NAME,
+      typing: false
+    });
+
+    const botClientId = randomUUID();
+
+    // Ensure the sender (the bot itself) is included in the members list passed to encryptMessage
+    const recipientMembers = [...members.map(m => ({ id: m.id, identity: m.identity }))];
+    if (!recipientMembers.some(m => m.id === BOT_USER_ID)) {
+      recipientMembers.push({ id: BOT_USER_ID, identity: botIdentity.publicIdentity });
+    }
+
+    const encryptedReply = await encryptMessage(
+      botIdentity,
+      conversationId,
+      botClientId,
+      replyText,
+      recipientMembers
+    );
+
+    const saved = saveMessage(db, BOT_USER_ID, {
+      conversationId,
+      clientId: botClientId,
+      encrypted: encryptedReply
+    });
+
+    io.to(members.map(m => room(m.id))).emit('message:new', saved.message);
+  } catch (error) {
+    console.error('handleBotTrigger execution failed:', error);
   }
-
-  const shouldTrigger = isDirect || /(@campus_ai|\/ai\b|@ai\b)/i.test(plainText);
-  if (!shouldTrigger) return;
-
-  const cleanedPrompt = plainText.replace(/(@campus_ai|\/ai|@ai)/gi, '').trim() || 'Hello!';
-
-  const room = (id) => `user:${id}`;
-  io.to(members.map(m => room(m.id))).emit('typing:update', {
-    conversationId,
-    userId: BOT_USER_ID,
-    name: BOT_NAME,
-    typing: true
-  });
-
-  const replyText = await callLlm(cleanedPrompt);
-
-  io.to(members.map(m => room(m.id))).emit('typing:update', {
-    conversationId,
-    userId: BOT_USER_ID,
-    name: BOT_NAME,
-    typing: false
-  });
-
-  const botClientId = randomUUID();
-  const encryptedReply = await encryptMessage(
-    botIdentity,
-    conversationId,
-    botClientId,
-    replyText,
-    members.map(m => ({ id: m.id, identity: m.identity }))
-  );
-
-  const saved = saveMessage(db, BOT_USER_ID, {
-    conversationId,
-    clientId: botClientId,
-    encrypted: encryptedReply
-  });
-
-  io.to(members.map(m => room(m.id))).emit('message:new', saved.message);
 }
