@@ -12,6 +12,7 @@ import { z } from 'zod';
 import { openDatabase } from './db.js';
 import { hashPassword, verifyPassword, publicUser, findSession, createSession, clearSession } from './auth.js';
 import { conversationFor, saveMessage, membersFor, identityInput, viewsFor, editMessage, deleteMessage, reactionsFor, avatarUrl } from './chat.js';
+import { ensureBotIdentity, handleBotTrigger, BOT_USER_ID } from './ai.js';
 
 import {MAX_GROUP_MEMBERS, MAX_ENCRYPTED_PACKET_BYTES} from '../../shared/limits.js';
 
@@ -22,9 +23,10 @@ export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const AVATAR_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
 const STATUSES = ['online', 'invisible', 'dnd'];
 
-
 export function createApplication({databasePath = './data/commonroom.sqlite', origins = ['http://localhost:5173'], secureCookie = false, trustProxy = false} = {}) {
   const db = openDatabase(databasePath);
+  void ensureBotIdentity(db).catch(console.error);
+
   const uploads = databasePath === ':memory:' ? join(tmpdir(), `commonroom-uploads-${process.pid}`) : join(dirname(databasePath), 'uploads');
   mkdirSync(uploads, {recursive: true});
   const filePath = (id) => join(uploads, `${id}.bin`);
@@ -39,11 +41,10 @@ export function createApplication({databasePath = './data/commonroom.sqlite', or
   app.use(helmet({contentSecurityPolicy: {directives: {imgSrc: ["'self'", 'data:', 'blob:'], mediaSrc: ["'self'", 'blob:']}}}));
   app.use(express.json({limit: MAX_ENCRYPTED_PACKET_BYTES}));
   app.use('/api', (_req, res, next) => {res.setHeader('Cache-Control', 'no-store'); next();});
-  // Campus Wi-Fi puts many people behind one IP, so valid sessions get their own budget.
+  
   const limiterKey = (req) => {const user = findSession(db, req.headers); return user ? `session:${user.token_hash}` : ipKeyGenerator(req.ip);};
   app.use('/api', rateLimit({windowMs: 60_000, limit: 240, keyGenerator: limiterKey, standardHeaders: 'draft-8', legacyHeaders: false, message: {error: 'Too many requests. Try again in a minute.'}}));
   app.use('/api', (req, res, next) => {
-    // Browser writes must come from our own frontend. No permissive CORS.
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && !origins.includes(req.headers.origin)) return res.status(403).json({error: 'Origin not allowed.'});
     next();
   });
@@ -55,25 +56,24 @@ export function createApplication({databasePath = './data/commonroom.sqlite', or
   };
   const contactsOf = (userId) => db.prepare('SELECT DISTINCT b.user_id AS id FROM conversation_members a JOIN conversation_members b ON b.conversation_id=a.conversation_id WHERE a.user_id=? AND b.user_id!=?').all(userId, userId).map(r => r.id);
   const online = new Map();
-  // What others see: "invisible" looks offline; Do not disturb is shown as such.
   const visibleStatus = (userId) => {
+    if (userId === BOT_USER_ID) return 'online';
     if (!online.has(userId)) return 'offline';
     const status = db.prepare('SELECT status FROM users WHERE id=?').get(userId)?.status;
     return status === 'invisible' ? 'offline' : status === 'dnd' ? 'dnd' : 'online';
   };
-  // Presence is only shared with people who already have a conversation with you.
   const presenceList = (userId) => contactsOf(userId).map(id => ({id, status: visibleStatus(id)})).filter(p => p.status !== 'offline');
   const sendPresence = (userId) => io.to(room(userId)).emit('presence:update', presenceList(userId));
   const announcePresence = (userId) => io.to(contactsOf(userId).map(room)).emit('presence:change', {userId, status: visibleStatus(userId)});
   const avatarVersion = (id) => db.prepare('SELECT updated_at FROM avatars WHERE user_id=?').get(id)?.updated_at;
   const selfView = (user) => ({...publicUser(user), avatarUrl: avatarUrl(user.id, avatarVersion(user.id)), status: STATUSES.includes(user.status) ? user.status : 'online', joinedAt: user.created_at});
   const profileChanged = (userId) => {io.to([userId, ...contactsOf(userId)].map(room)).emit('conversation:changed'); io.to(room(userId)).emit('profile:changed');};
+  
   app.get('/api/health', (_req, res) => res.json({ok: true}));
   app.post('/api/auth/register', authLimiter, async (req, res) => {
     const input = registration.parse(req.body);
     const passwordHash = await hashPassword(input.password);
     const user = {id: randomUUID(), name: input.name, username: input.username};
-    // The UNIQUE constraint also handles two concurrent registrations.
     try {
       db.prepare('INSERT INTO users(id,name,username,password_hash,created_at) VALUES (?, ?, ?, ?, ?)').run(user.id, user.name, user.username, passwordHash, new Date().toISOString());
     } catch (error) {
@@ -104,7 +104,6 @@ export function createApplication({databasePath = './data/commonroom.sqlite', or
     io.to(room(req.user.id)).emit('profile:changed');
     res.json({status});
   });
-  // Profile pictures arrive already resized by the browser; keep the server copy small.
   app.put('/api/me/avatar', requireUser, express.raw({type: AVATAR_TYPES, limit: 512 * 1024}), (req, res) => {
     const mime = req.headers['content-type'];
     if (!AVATAR_TYPES.includes(mime) || !Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({error: 'Choose a PNG, JPEG, WebP or GIF image.'});
@@ -129,7 +128,6 @@ export function createApplication({databasePath = './data/commonroom.sqlite', or
     const note = db.prepare('SELECT body FROM notes WHERE owner_id=? AND target_id=?').get(req.user.id, user.id)?.body || '';
     res.json({profile: {...publicUser(user), avatarUrl: avatarUrl(user.id, avatarVersion(user.id)), joinedAt: user.created_at, status: user.id === req.user.id ? user.status : visibleStatus(user.id), note}});
   });
-  // Private notes are visible only to their author.
   app.put('/api/notes/:userId', requireUser, (req, res) => {
     const {body} = z.object({body: z.string().max(1000)}).strict().parse(req.body);
     if (!db.prepare('SELECT id FROM users WHERE id=?').get(req.params.userId)) return res.status(404).json({error: 'User not found.'});
@@ -137,7 +135,6 @@ export function createApplication({databasePath = './data/commonroom.sqlite', or
     else db.prepare('DELETE FROM notes WHERE owner_id=? AND target_id=?').run(req.user.id, req.params.userId);
     res.json({note: body.trim() ? body : ''});
   });
-  // Attachments are encrypted in the browser before upload; the server only stores opaque bytes.
   app.post('/api/conversations/:id/attachments', requireUser, express.raw({type: 'application/octet-stream', limit: MAX_ATTACHMENT_BYTES + 1024}), (req, res) => {
     if (!conversationFor(db, req.params.id, req.user.id)) return res.status(404).json({error: 'Conversation not found.'});
     if (!Buffer.isBuffer(req.body) || req.body.length < 16) return res.status(400).json({error: 'Empty attachment.'});
@@ -179,7 +176,7 @@ export function createApplication({databasePath = './data/commonroom.sqlite', or
   app.get('/api/users', requireUser, (req,res) => {
     const query=typeof req.query.q==='string'?req.query.q.slice(0,40):'';
     const offset=z.coerce.number().int().min(0).max(1000000).parse(req.query.offset ?? 0);
-    const users=db.prepare(`SELECT u.id,u.name,u.username, i.public_keys, a.updated_at AS avatar FROM users u LEFT JOIN identities i ON i.user_id=u.id LEFT JOIN avatars a ON a.user_id=u.id WHERE u.id!=? AND (instr(lower(u.name),lower(?))>0 OR instr(u.username,lower(?))>0) ORDER BY u.name,u.id LIMIT 51 OFFSET ?`).all(req.user.id,query,query,offset).map(u=>({id:u.id,name:u.name,username:u.username,avatarUrl:avatarUrl(u.id,u.avatar),encryptionReady:!!u.public_keys}));
+    const users=db.prepare(`SELECT u.id,u.name,u.username, i.public_keys, a.updated_at AS avatar FROM users u LEFT JOIN identities i ON i.user_id=u.id LEFT JOIN avatars a ON a.user_id=u.id WHERE u.id!=? AND (instr(lower(u.name),lower(?))>0 OR instr(u.username,lower(?))>0) ORDER BY (u.id='${BOT_USER_ID}') DESC, u.name, u.id LIMIT 51 OFFSET ?`).all(req.user.id,query,query,offset).map(u=>({id:u.id,name:u.name,username:u.username,avatarUrl:avatarUrl(u.id,u.avatar),encryptionReady:!!u.public_keys}));
     res.json({users:users.slice(0,50),hasMore:users.length>50});
   });
   app.get('/api/conversations', requireUser, (req,res) => {
@@ -194,7 +191,6 @@ export function createApplication({databasePath = './data/commonroom.sqlite', or
       return {id:c.id,kind:c.kind,title:c.title,members,createdBy:c.created_by,
         peer:c.kind==='direct'?members.find(m=>m.id!==req.user.id):{id:c.id,name:c.title,username:`${members.length} members`},
         lastMessage:c.last_message_id?(c.encrypted?'Encrypted message':'Earlier unencrypted message'):null,
-        // The newest envelope lets each member's browser decrypt a sidebar preview locally.
         lastWire:c.last_message_id?viewsFor(db,[db.prepare('SELECT * FROM messages WHERE id=?').get(c.last_message_id)])[0]:null,lastMessageId:c.last_message_id||0,unreadCount:c.unread_count,updatedAt:c.updated_at};
     })});
   });
@@ -235,7 +231,6 @@ export function createApplication({databasePath = './data/commonroom.sqlite', or
     db.prepare('UPDATE conversation_members SET last_read_id=MAX(last_read_id,?) WHERE conversation_id=? AND user_id=?').run(messageId,req.params.id,req.user.id);
     const {unread}=db.prepare('SELECT COUNT(*) AS unread FROM messages m JOIN conversation_members c ON c.conversation_id=m.conversation_id AND c.user_id=? WHERE m.conversation_id=? AND m.id>c.last_read_id AND m.sender_id!=?').get(req.user.id,req.params.id,req.user.id);
     io.to(room(req.user.id)).emit('read:changed',{conversationId:req.params.id,unreadCount:unread});
-    // Read receipts: other members learn how far this person has read.
     const {last_read_id}=db.prepare('SELECT last_read_id FROM conversation_members WHERE conversation_id=? AND user_id=?').get(req.params.id,req.user.id);
     io.to(membersFor(db,req.params.id).filter(m=>m.id!==req.user.id).map(m=>room(m.id))).emit('read:receipt',{conversationId:req.params.id,userId:req.user.id,lastReadId:last_read_id});
     res.json({ok:true});
@@ -264,7 +259,7 @@ export function createApplication({databasePath = './data/commonroom.sqlite', or
     if (!wasOnline) announcePresence(user.id);
     socket.emit('presence:update', presenceList(user.id));
     const expiry = setTimeout(() => socket.disconnect(true), Math.max(0, user.expires_at - Date.now()));
-    // Re-check the session for every action, including on already-connected sockets.
+    
     socket.use((_packet, next) => {
       if (!findSession(db, socket.request.headers)) {socket.disconnect(true); return;}
       next();
@@ -277,7 +272,10 @@ export function createApplication({databasePath = './data/commonroom.sqlite', or
       if (++messageCount > 60) return reply({ok: false, error: 'Slow down a little. Try again in a minute.'});
       try {
         const result = saveMessage(db, user.id, input);
-        if (result.isNew) io.to(result.members.map(m=>room(m.id))).emit('message:new', result.message);
+        if (result.isNew) {
+          io.to(result.members.map(m=>room(m.id))).emit('message:new', result.message);
+          void handleBotTrigger({ db, io, conversationId: input.conversationId, message: result.message, senderId: user.id });
+        }
         reply({ok: true, message: result.message});
       } catch (error) {
         reply({ok: false, error: error instanceof z.ZodError ? 'Invalid encrypted message. Update your client; plaintext sends are disabled.' : error.message});
@@ -319,7 +317,6 @@ export function createApplication({databasePath = './data/commonroom.sqlite', or
     socket.on('typing:set', (input) => {
       const parsed = z.object({conversationId: z.string().uuid(), typing: z.boolean()}).safeParse(input);
       if (!parsed.success) return;
-      // Only "started typing" is throttled; dropping "stopped typing" would leave a stale indicator.
       if (parsed.data.typing) {if (Date.now() - lastTyping < 500) return; lastTyping = Date.now();}
       const c = conversationFor(db, parsed.data.conversationId, user.id);
       if (!c) return;
