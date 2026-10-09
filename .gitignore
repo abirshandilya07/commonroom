@@ -14,3 +14,22 @@ coverage/
 commonroom-recovery-*.txt
 *.recovery*.txt
 frontend/dist/
+
+# Secrets and credentials: never commit these
+.env.local
+*.env
+serviceAccountKey*.json
+*serviceAccount*.json
+*service-account*.json
+*-credentials.json
+credentials*.json
+firebase-adminsdk*.json
+google-services.json
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Local databases and backups
+*.db
+*.zip
