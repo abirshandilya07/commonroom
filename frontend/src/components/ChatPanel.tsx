@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { ArrowLeft, Send, Check, MessageSquare, Info, X, Search, LockKeyhole, ArrowDown, Paperclip, Mic, Pencil, Trash2, SmilePlus, ImageIcon, Film, Sparkles } from 'lucide-react';
+import { ArrowLeft, Send, Check, MessageSquare, Info, X, Search, LockKeyhole, ArrowDown, Paperclip, Mic, Pencil, Trash2, SmilePlus, ImageIcon, Film, FileText, Sparkles, Shield } from 'lucide-react';
 import Avatar from './Avatar';
 import AttachmentView from './Attachment';
 import VoiceRecorder from './VoiceRecorder';
 import MarkdownView from './MarkdownView';
 import { fingerprint } from '../lib/encryption';
-import { formatBytes, kindOf, MAX_ATTACHMENT_BYTES, MAX_TEXT } from '../lib/media';
+import { formatBytes, kindOf, scanFileSafety, MAX_ATTACHMENT_BYTES, MAX_TEXT } from '../lib/media';
 import type { Outgoing } from '../hooks/useChat';
 import type { Conversation, Message, Presence, User } from '../lib/types';
 
@@ -37,6 +37,7 @@ export default function ChatPanel(p: Props) {
   const [findOpen, setFindOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [file, setFile] = useState<File | null>(null);
+  const [fileSafe, setFileSafe] = useState<boolean | null>(null);
   const [recording, setRecording] = useState(false);
   const [editing, setEditing] = useState<{id: number; text: string} | null>(null);
   const [picker, setPicker] = useState<number | null>(null);
@@ -110,20 +111,38 @@ export default function ChatPanel(p: Props) {
     event.preventDefault();
     const body = draft.trim();
     if ((!body && !file) || busy) return;
+    if (file && fileSafe === false) {
+      setError('Cannot send file: file failed security validation.');
+      return;
+    }
     const ok = await deliver(body, file ? {file, name: file.name} : undefined, {body, file});
     if (ok) {
       setDraft('');
-      setFile(current => current === file ? null : current);
+      setFile(null);
+      setFileSafe(null);
       retry.current = null;
       p.onTyping(p.conversation.id, false);
     }
   }
 
-  function choose(selected?: File) {
+  async function choose(selected?: File) {
     if (!selected) return;
-    if (!kindOf(selected.type)) { setError('Choose an image, video or audio file.'); return; }
+    const mime = selected.type || 'text/plain';
+    if (!kindOf(mime)) { setError('Choose an image, video, audio file, or text document.'); return; }
     if (selected.size > MAX_ATTACHMENT_BYTES) { setError(`That file is ${formatBytes(selected.size)}. Files can be up to 25 MB.`); return; }
+    
     setError('');
+    setFileSafe(null);
+
+    const report = await scanFileSafety(selected);
+    if (!report.safe) {
+      setFileSafe(false);
+      setError(report.reason || 'File flagged as unsafe.');
+      setFile(selected);
+      return;
+    }
+
+    setFileSafe(true);
     setFile(selected);
   }
 
@@ -158,6 +177,8 @@ export default function ChatPanel(p: Props) {
   const lastOwn = [...p.messages].reverse().find(m => m.senderId === p.user.id && !m.deleted);
   const seenBy = lastOwn ? p.conversation.members.filter(m => m.id !== p.user.id && (m.lastReadId || 0) >= lastOwn.id) : [];
   const nameOf = (id: string) => id === p.user.id ? 'You' : p.conversation.members.find(m => m.id === id)?.name || 'Someone';
+
+  const fileKind = file ? kindOf(file.type || 'text/plain') : null;
 
   return (
     <section className="flex h-full min-w-0 flex-1 flex-col bg-canvas text-ink">
@@ -299,7 +320,7 @@ export default function ChatPanel(p: Props) {
                           {m.reactions.map(r => {
                             const mine = r.userIds.includes(p.user.id);
                             return (
-                              <button key={r.emoji} onClick={() => void react(m, r.emoji)} title={r.userIds.map(nameOf).join(', ')} aria-pressed={mine} aria-label={`${r.emoji}${r.userIds.length}`} className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs ${mine ? 'border-accent bg-accent-soft' : 'border-line bg-soft hover:border-accent'}`}>
+                              <button key={r.emoji} onClick={() => void react(m, r.emoji)} title={r.userIds.map(nameOf).join(', ')} aria-pressed={mine} aria-label={`${r.emoji} ${r.userIds.length}`} className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs ${mine ? 'border-accent bg-accent-soft' : 'border-line bg-soft hover:border-accent'}`}>
                                 <span>{r.emoji}</span>
                                 <span className="text-[10px] font-semibold">{r.userIds.length}</span>
                               </button>
@@ -354,17 +375,27 @@ export default function ChatPanel(p: Props) {
           ) : (
             <>
               {file && (
-                <div className="mx-3 mt-3 flex items-center gap-2 rounded-lg border border-line bg-soft px-3 py-2 text-xs">
-                  {kindOf(file.type) === 'video' ? <Film size={15} className="text-accent"/> : kindOf(file.type) === 'audio' ? <Mic size={15} className="text-accent"/> : <ImageIcon size={15} className="text-accent"/>}
+                <div className={`mx-3 mt-3 flex items-center gap-2 rounded-lg border px-3 py-2 text-xs ${fileSafe === false ? 'border-red-500/40 bg-red-500/10' : 'border-line bg-soft'}`}>
+                  {fileKind === 'video' ? <Film size={15} className="text-accent"/> : fileKind === 'audio' ? <Mic size={15} className="text-accent"/> : fileKind === 'document' ? <FileText size={15} className="text-accent"/> : <ImageIcon size={15} className="text-accent"/>}
                   <span className="min-w-0 flex-1 truncate font-semibold">{file.name}</span>
                   <span className="text-muted">{formatBytes(file.size)}</span>
-                  <button type="button" aria-label="Remove attachment" disabled={busy} onClick={() => setFile(null)}><X size={14}/></button>
+                  {fileSafe === true && (
+                    <span className="flex items-center gap-1 rounded bg-emerald-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+                      <Shield size={12} className="text-emerald-500"/> Safe
+                    </span>
+                  )}
+                  {fileSafe === false && (
+                    <span className="flex items-center gap-1 rounded bg-red-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-red-500">
+                      <Shield size={12} className="text-red-500"/> Blocked
+                    </span>
+                  )}
+                  <button type="button" aria-label="Remove attachment" disabled={busy} onClick={() => { setFile(null); setFileSafe(null); }}><X size={14}/></button>
                 </div>
               )}
               <textarea aria-label="Message" placeholder={file ? 'Add a caption (optional)' : isBotDm ? 'Ask Campus AI anything…' : `Message ${p.conversation.peer.name} (type @ai to ask AI)`} rows={2} maxLength={MAX_TEXT} disabled={busy} value={draft} onChange={(e) => {setDraft(e.target.value); p.onTyping(p.conversation.id, !!e.target.value.trim());}} onKeyDown={(e) => {if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {e.preventDefault(); void submit(e);}}} className="block max-h-36 min-h-[70px] w-full resize-none bg-transparent px-4 pb-2 pt-3 text-[13px] leading-6"/>
               <div className="flex items-center justify-between gap-2 px-2 pb-2">
                 <div className="flex items-center gap-1">
-                  <button type="button" aria-label="Attach image, video or audio" title="Attach file (up to 25 MB)" disabled={busy || !ready || !p.connected} className="icon-button h-8 w-8" onClick={() => filePicker.current?.click()}><Paperclip size={17}/></button>
+                  <button type="button" aria-label="Attach file" title="Attach file or document (up to 25 MB)" disabled={busy || !ready || !p.connected} className="icon-button h-8 w-8" onClick={() => filePicker.current?.click()}><Paperclip size={17}/></button>
                   <button type="button" aria-label="Record voice note" title="Record voice note" disabled={busy || !ready || !p.connected} className="icon-button h-8 w-8" onClick={() => {setError(''); setRecording(true);}}><Mic size={17}/></button>
                   {!isBotDm && (
                     <button type="button" aria-label="Ask Campus AI" title="Ask Campus AI (@ai)" disabled={busy || !ready || !p.connected} className="flex h-8 items-center gap-1.5 rounded-lg border border-accent/30 bg-accent-soft/40 px-2.5 text-xs font-semibold text-accent transition hover:bg-accent-soft" onClick={triggerAiInDraft}>
@@ -372,10 +403,10 @@ export default function ChatPanel(p: Props) {
                       <span>Ask AI</span>
                     </button>
                   )}
-                  <input ref={filePicker} type="file" accept="image/*,video/*,audio/*" hidden onChange={e => {choose(e.target.files?.[0]); e.target.value = '';}}/>
+                  <input ref={filePicker} type="file" accept="image/*,video/*,audio/*,text/plain,application/pdf,.md,.txt,.json" hidden onChange={e => {choose(e.target.files?.[0]); e.target.value = '';}}/>
                   <span className="ml-1 hidden text-[10px] text-muted sm:inline">{busy && file ? 'Encrypting and uploading…' : draft.length > 0 ? `${draft.length.toLocaleString()} / 2,000` : ''}</span>
                 </div>
-                <button type="submit" disabled={busy || !ready || !p.connected || (!draft.trim() && !file)} aria-label={busy ? 'Sending message' : error ? 'Retry message' : 'Send message'} className="primary-button rounded-md px-3 py-2"><Send size={15}/><span className="hidden text-xs sm:inline">Send</span></button>
+                <button type="submit" disabled={busy || !ready || !p.connected || (!draft.trim() && !file) || fileSafe === false} aria-label={busy ? 'Sending message' : error ? 'Retry message' : 'Send message'} className="primary-button rounded-md px-3 py-2"><Send size={15}/><span className="hidden text-xs sm:inline">Send</span></button>
               </div>
             </>
           )}

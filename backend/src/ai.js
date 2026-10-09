@@ -41,7 +41,7 @@ async function resolveActiveModel(apiKey) {
   if (selectedModel) return selectedModel;
 
   try {
-    const res = await fetch('[https://api.groq.com/openai/v1/models](https://api.groq.com/openai/v1/models)', {
+    const res = await fetch('https://api.groq.com/openai/v1/models', {
       headers: { Authorization: `Bearer ${apiKey}` }
     });
     if (res.ok) {
@@ -95,7 +95,7 @@ async function callLlm(prompt, context = []) {
   ];
 
   try {
-    const res = await fetch('[https://api.groq.com/openai/v1/chat/completions](https://api.groq.com/openai/v1/chat/completions)', {
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
