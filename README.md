@@ -1,263 +1,198 @@
-# Commonroom
+# Common Room
 
-A Slack-inspired campus real-time chat starter for FIRST COMMIT, IIT Mandi's 24-hour hackathon.
+**The campus chat where even our own server can't read your messages, and the AI only listens when you ask.**
 
-**Status:** runnable foundation, not a finished competition submission. Real authentication, encrypted direct/group messages, notifications, and persistent storage are implemented. Encryption is a prototype, not an audited secure messenger; read `docs/ENCRYPTION.md`. No mock users or fake conversations are inserted into the database.
+Common Room is a real-time chat app for campus students, built by **Team 8 bit Precision** for FIRST COMMIT, IIT Mandi's 24-hour hackathon. Every message, photo, voice note and file is encrypted in your browser before it leaves your device, so the server only ever stores locked data. On top of that sits an AI assistant that respects the same privacy, and a **built-in planner** where you or the AI can set reminders and tasks straight from a conversation and see them on a calendar.
 
-## Start here (Windows, macOS, or Linux)
+## Try it online
 
-1. Install **Node.js 24.x** and npm. `node -v` should start with `v24.`. If you just installed Node on Windows, reopen VS Code and its terminal.
-2. Extract the ZIP into a new folder and open that folder in VS Code. The updated ZIP places `package.json`, `package-lock.json`, `frontend/`, and `backend/` directly at its root. Run every command below from that folder. On Windows you can instead double-click `START_WINDOWS.cmd`; it switches to the correct folder, checks Node 24, installs dependencies, and starts the app.
-3. Install the exact dependency versions and start both processes:
+**Live demo: https://commonroom-a8ve.onrender.com**
 
-```bash
-npm ci
-npm run dev
-```
+> **Please read before testing.** The demo runs on Render's free plan:
+> - **The first load can take about a minute.** The free server goes to sleep when nobody is using it and wakes up when you open the link.
+> - **Data is wiped after about 15 minutes with no visitors.** When the server sleeps, all accounts, messages and uploaded files are deleted, and it starts fresh on the next visit. If your account suddenly no longer exists, that's why: just register again.
+>
+> Test in one sitting. To try chatting, register two accounts: one in a normal window and one in a private/incognito window (or a different browser).
 
-4. Open **http://localhost:5173**. Use this address consistently instead of switching between localhost and 127.0.0.1 (their cookies are separate).
-5. Create your account. Open an **incognito window or a different browser**, create a second account, and keep both windows open. Two normal tabs share the same login cookie.
-6. Open each account: encryption keys are created and remembered automatically on this browser. Optional **Privacy & backup** is below your name in the sidebar. Download a recovery key there before switching browsers or clearing site data.
-7. Use the single **New conversation** compose icon beside Commonroom (or Ctrl+K): pick a person for a direct message, or select **Group chat**, enter a name, and choose 2–255 other people. Everyone must open their chats once first.
-8. Use the top-bar bell to enable optional sound/desktop alerts and open unread conversations. Refresh to confirm saved history.
+Running it on your own computer (below) keeps your data permanently.
 
-No external API keys, database signup, Docker, or manual database creation are needed. The backend creates `backend/data/commonroom.sqlite` automatically. Keep this folder to preserve users and messages.
+<p align="center"><a href="#try-it-online"><img src="docs/screenshots/chat-dark.png" alt="Chat, dark theme" width="100%"></a></p>
 
-Stop both servers with Ctrl+C. Node 24 may print an experimental warning for `node:sqlite`; it is a Node API status warning, not an application failure. Use the documented Node version rather than an older installation.
+## ⏰ Never miss a deadline: reminders, tasks and calendar
 
-## Commands
+Plans made in a chat usually get lost in the scroll. In Common Room they turn into reminders and tasks in the same place you talk, so students can keep track of assignments, submissions and meetings without a separate app.
 
-| Command (from repo root) | Purpose |
+<table>
+  <tr>
+    <td><a href="#-never-miss-a-deadline-reminders-tasks-and-calendar"><img src="docs/screenshots/calendar-light.png" alt="Month calendar of tasks and reminders" width="100%"></a></td>
+    <td><a href="#-never-miss-a-deadline-reminders-tasks-and-calendar"><img src="docs/screenshots/ai-tasks.png" alt="AI creating reminders and tasks" width="100%"></a></td>
+  </tr>
+</table>
+
+- **Just ask, in any chat.** Type `@ai remind me to submit the deck at 11 pm` or `@ai add a task: record the demo` in a direct message, a group or your private AI chat. The AI creates it, confirms the time in your local time, and asks for a time if you forgot one. You can also say "mark the demo task done".
+- **Reminders that actually remind you.** When something is due, a pop-up appears in the app and a "⏰ Reminder" message lands in your private AI chat, even if you set it hours ago from a group chat.
+- **A month calendar of everything.** The *Reminders & tasks* tab opens on a calendar. Each day shows what's due, and overdue items are marked in red. Click a day to add a task or reminder for it, and click an item to rename it, move it to another date or time, tick it off or delete it.
+- **A list view too.** Switch to *List* to see everything grouped into Overdue, Upcoming, No date and Done.
+- **Context kept.** A reminder created from a conversation shows which chat it came from.
+- **Tasks with or without a date.** Reminders always need a time; tasks can stay undated until you're ready to schedule them.
+
+## Features
+
+### Private by design
+- **End-to-end encrypted direct messages and groups.** Text, edits, photos, videos, voice notes, documents and GIFs are encrypted in the browser (AES-256-GCM with a fresh key each time, wrapped for each member with RSA-OAEP, and signed with ECDSA). The server rejects anything unencrypted and stores only ciphertext.
+- **Password unlock on new browsers.** Sign in on any browser and your password unlocks your keys automatically. A downloadable recovery key (in *Privacy & backup*) is the backup if you forget your password.
+- **Key fingerprints.** Each person's key is pinned the first time you chat, and the chat is blocked if it changes unexpectedly. You can compare fingerprints in conversation details.
+- **Safe file sharing.** The server can't scan encrypted files, so the browser checks them twice: before encrypting and after decrypting. Programs and scripts (.exe, .bat, .js, .html, .svg …) are blocked, files whose bytes don't match their type (an .exe renamed to .pdf) are rejected, and file names are cleaned.
+
+### Chatting
+- Direct messages and **groups of 3–256 people**. The group creator can add and remove members; anyone can leave.
+- **Photos, videos, voice notes** (record with the mic, up to 5 minutes, with a live level animation) and **documents** (PDF, Word, Excel, PowerPoint, text, CSV, ZIP), up to 25 MB each. Photos and videos show a preview before sending, and videos open in a larger viewer.
+- **Reactions, editing and deleting** from the hover toolbar. Edits are re-encrypted and marked "(edited)".
+- **Emoji picker** and a **GIF tab** (search GIPHY, or upload your own GIF).
+- **Typing indicators**, **"Seen" receipts** ("Seen by …" in groups), and decrypted message previews in the sidebar.
+- **Clickable links** in messages.
+- **Search**: search the open chat, or *Search all history*, which decrypts and searches your whole history on your own device.
+- **Notifications**: unread counts, a notification bell, in-app toasts, and an optional chime and desktop alerts (desktop alerts never show message text).
+
+### People
+- **Friends**: search anyone by name or username, send friend requests, accept or decline them, and see your friends listed online first with their status.
+- **Profiles**: click a name to see someone's display name, username, join date and status, and keep a private note about them.
+- **Status**: Online, Do not disturb (mutes your alerts) or Appear offline, from your name at the bottom left.
+- **Settings**: change your display name and profile picture.
+- **Moderation**: report a message, block a person (ends the friendship and stops requests both ways), and group creators can remove any message in their group.
+
+### Common Room AI (powered by Groq)
+- **Private AI chat**: open *Common Room AI* in the sidebar. Only you see it.
+- **@ai in any chat**: write `@ai` in a direct or group message and the answer appears in that chat for everyone.
+- **Privacy rule**: by default the AI receives only the message that mentions it. It reads the last 30 messages only when you ask it to ("@ai summarize the chat"). A checkbox above the message box shows which applies before you send.
+- **Reminders, tasks and calendar**: see [Never miss a deadline](#-never-miss-a-deadline-reminders-tasks-and-calendar) above.
+
+### Fun
+- **Memer**: type `@meme` (or `@meme ProgrammerHumor` for a specific subreddit), or press the laughing-face button, to send a random Reddit meme to the chat. NSFW and spoiler posts are skipped.
+
+### Look and feel
+- **Six colour palettes** (Grape, Ocean, Forest, Sunset, Rose, Slate), each with light and dark mode, chosen in your profile settings.
+- Show-password toggle on the sign-in and unlock screens.
+- Works on desktop and mobile screen sizes.
+
+<table>
+  <tr>
+    <td><a href="#features"><img src="docs/screenshots/group-light.png" alt="Group chat" width="100%"></a></td>
+    <td><a href="#features"><img src="docs/screenshots/ai-mention.png" alt="AI mention" width="100%"></a></td>
+  </tr>
+  <tr>
+    <td><a href="#features"><img src="docs/screenshots/notifications-dark.png" alt="Notifications" width="100%"></a></td>
+    <td><a href="#features"><img src="docs/screenshots/friends-home-dark.png" alt="Friends" width="100%"></a></td>
+  </tr>
+</table>
+
+## How it works
+
+<p align="center"><a href="#how-it-works"><img src="docs/architecture.png" alt="Common Room architecture" width="100%"></a></p>
+
+The numbers trace one message from the sender's browser, through the server, to the recipient's browser. More detail is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/ENCRYPTION.md](docs/ENCRYPTION.md).
+
+| Layer | Choice |
 |---|---|
-| `npm ci` | Reproduce the locked installation |
-| `npm run dev` | Start frontend :5173 and backend :3001 together |
-| `npm run build` | Type-check and build the frontend |
-| `npm test` | Run backend integration tests with real WebSocket clients |
-| `npm run check` | Build, type-check, and test |
-| `npm start` | Start backend and serve an already-built frontend on :3001 |
+| UI | React 19 + TypeScript + Vite 7, Tailwind CSS 4, Lucide icons |
+| Server | Node.js 24, Express 5, JavaScript ES modules |
+| Real-time | Socket.IO 4 |
+| Storage | SQLite via Node's built-in `node:sqlite` (created automatically) |
+| Auth | HTTP-only cookie sessions, scrypt password hashes |
+| Encryption | Browser Web Crypto: AES-GCM, RSA-OAEP, ECDSA, PBKDF2 |
+| AI | Groq API from the server (Google Gemini as an alternative) |
+| Validation and tests | Zod; Node test runner with real HTTP and WebSocket clients |
 
-For the built app: stop `npm run dev`, run `npm run build`, then `npm start`, and visit **http://localhost:3001**. `npm start` does not rebuild the UI. If you made a backend `.env`, update APP_ORIGIN for port 3001.
+## Run it on your computer
 
+1. Install **Node.js 24.x** (`node -v` should start with `v24.`).
+2. Clone this repository and open the folder in a terminal.
+3. Install and start:
 
-## Fixing the screenshot's npm ci error
+   ```bash
+   npm ci
+   npm run dev
+   ```
 
-`npm ci` needs a valid `package-lock.json` in the project root. The original ZIP included `commonroom/package-lock.json`. Your screenshot shows the terminal in `~/Commonroom_starter`, so the likely issue is being one folder above the project. In the original extraction:
+   On Windows you can double-click `START_WINDOWS.cmd` instead.
+4. Open **http://localhost:5173**, create an account, then create a second account in a private window to chat between them.
+
+The app works without any keys. The database is created automatically at `backend/data/commonroom.sqlite`.
+
+### Optional: AI and GIF search
+
+Copy the example settings file and fill in the keys you want:
 
 ```bash
-cd commonroom
-ls package.json package-lock.json
-npm ci
-npm run dev
+cp backend/.env.example backend/.env          # macOS / Linux / Git Bash
+Copy-Item backend/.env.example backend/.env   # Windows PowerShell
 ```
 
-The updated ZIP removes this extra nested folder. Open the directory that directly contains **both** package files, frontend, and backend. If the files truly are missing, re-extract the full download; do not create a blank lockfile. `npm install` can generate a missing lockfile only when a valid package.json is present, but it is not necessary for this supplied archive.
+| Variable | What it does |
+|---|---|
+| `GROQ_API_KEY` | Turns on Common Room AI. Free key at https://console.groq.com/keys |
+| `GROQ_MODEL` | Optional Groq model (default `openai/gpt-oss-120b`) |
+| `GEMINI_API_KEY` / `GEMINI_MODEL` | Alternative to Groq, used only when `GROQ_API_KEY` is empty |
+| `GIPHY_API_KEY` | Turns on GIF search. Free key at https://developers.giphy.com/dashboard/ (uploading a GIF works without it) |
+| `PORT` | Backend port (default 3001) |
+| `APP_ORIGIN` | Allowed browser origin(s), e.g. `http://localhost:5173` |
+| `DATABASE_PATH` | Where the SQLite file lives |
+| `COOKIE_SECURE` | `true` when served over HTTPS |
+| `TRUST_PROXY` | `1` behind one trusted reverse proxy (e.g. Render) |
 
-## Version 2 (FIRST COMMIT build)
+Keys stay on the server and never reach the browser. Never commit `backend/.env`; `.gitignore` already excludes it. Restart `npm run dev` after changing it.
 
-- **Document sharing with file safety.** Share PDFs, Word/Excel/PowerPoint, text, CSV and ZIP files as well as media. Before encryption the sender's browser blocks executable and script types (.exe, .bat, .js, .html, .svg …), rejects files whose bytes don't match their type (for example a Windows program renamed to .pdf), and cleans file names. The receiver's browser repeats the check after decryption, and documents are always downloaded rather than rendered. The server can't scan content because it only ever sees ciphertext.
-- **Group members.** The group creator can add and remove people from Conversation details; anyone can leave (the creator role passes on if the creator leaves). Each message is encrypted for the members at send time, so new members see "Sent before you joined" for earlier messages and removed members can't read new ones.
-- **Images, videos and voice notes.** Attach with the paperclip, or press the mic to record (live level animation, up to 5 minutes). Files are encrypted in the browser with a fresh AES-GCM key before upload; the key travels inside the encrypted message, so the server stores only opaque bytes (`backend/data/uploads/`). Limit 25 MB per file.
-- **Reactions, editing and deleting.** Hover a message for the toolbar. Edits are re-encrypted and re-signed by the sender and marked "(edited)". Deleting removes the ciphertext, reactions and attachment for everyone.
-- **Profiles and settings.** Click a name or avatar to see a person's name, username, join date and status, and to keep a private note about them (only you can see it). The gear icon opens your own settings: change your display name and profile picture.
-- **Friends.** The *Friends* button in the left rail (or at the top of the sidebar) opens the Friends page, where you can search anyone by name or username and send a friend request. Requests show there with Accept and Decline, and you can also add, accept or remove friends from a person's profile. Your friends are listed online first with their status (Online, Do not disturb or Offline) and a button to message them. Blocking someone ends the friendship and stops requests both ways.
-- **Status.** Click your name at the bottom left to choose Online, Do not disturb (mutes your alerts and shows a red dot to others) or Appear offline.
-- **Sidebar previews and "Seen".** Each browser decrypts the latest message locally for the sidebar. Your newest message shows "Seen" (or "Seen by …" in groups) once others have read it.
-- **Reliability.** Unread counts update locally instead of reloading the conversation list for every message; API rate limits are per signed-in session (so a whole campus Wi-Fi isn't throttled together); presence is shared only with people you have a conversation with or are friends with; typing indicators stop promptly; the chat no longer jumps to the bottom while you read history.
+### Commands
 
-Reactions, profile pictures, display names and private notes are stored readable on the server. Message text, edits and media are end-to-end encrypted. The database migrates automatically to `user_version=4` on first start.
+| Command | Purpose |
+|---|---|
+| `npm run dev` | Start frontend (:5173) and backend (:3001) together |
+| `npm run build` | Type-check and build the frontend |
+| `npm start` | Serve the built app from the backend on :3001 |
+| `npm test` | Run the backend integration tests |
+| `npm run check` | Build and test |
 
-## This update
+### Deploying (how the demo is hosted)
 
-- No encryption setup or required backup screen for new accounts.
-- Same-browser keys survive sign-out; use Privacy & backup to export or forget them.
-- Smooth palette reveal without text color interpolation.
-- 256-member groups; paginated people search and matching encrypted-packet limits.
-- All/Direct/Groups filter strip removed; desktop rail and conversation sidebar remain.
+The demo runs on Render's free plan from this public repository: a Node web service with build command `npm ci && npm run build`, start command `npm start`, and the environment variables `NODE_VERSION=24`, `APP_ORIGIN=https://<your-app>.onrender.com`, `COOKIE_SECURE=true`, `TRUST_PROXY=1`, plus the optional keys above. Static hosts such as Vercel or Netlify can't run it, because the app needs a long-running Node process for WebSockets and SQLite.
 
-See `docs/UPDATE_NOTES.md` for upgrade steps and `docs/VERIFICATION.md` for checks.
-
-## Light and dark themes
-
-Use the sun/moon button at the bottom of the desktop rail or in the mobile top bar. It is also available before login. The first visit follows the operating system; toggling stores `commonroom-theme` in browser localStorage. Other tabs on the same origin update too. Clear that key to return to system-following behavior. The setting is per browser, not synced to an account.
-
-Theme tokens live in `frontend/src/index.css`, preference logic in `hooks/useTheme.tsx`, and the pre-paint initializer in `public/theme-init.js`. The external initializer works with the backend's Content Security Policy. Manual theme changes reveal the complete new palette over 280 ms using View Transitions, without fading text colors. Reduced-motion preferences and browsers without View Transitions switch immediately. System/cross-tab updates apply immediately. No new packages are needed for themes.
-
-## Updating your existing copy
-
-This update changes **both frontend and backend** and migrates the database. Stop the old app and back up your entire project first, including `backend/data/` and `.env`. Review any local source edits before replacing files.
-
-For an unmodified previous starter, extract this ZIP into a new folder. Copy your old `backend/data/` folder and optional `backend/.env` into the new backend folder while the old app is stopped. Then run `npm ci` and `npm run dev` from the new root. For a modified project, merge all source/config files, including the new `shared/` folder; do not update only the UI.
-
-On the first launch against the previous two-user schema, the app makes a consistent SQLite backup named `commonroom.sqlite.pre-v3-<timestamp>.sqlite`, migrates direct conversations into memberships, and preserves existing messages. The backup contains old plaintext history; keep it private. After upgrading, each account must complete encryption setup. Old messages remain clearly labelled **Earlier · unencrypted**; only new messages are encrypted. There is no automatic rollback; stop the app and restore the backup with the old code if necessary.
-
-Groups support 3–256 people; the creator can add or remove members. Communities remain deferred. “Commonroom” is the app name, not a multi-tenant workspace implementation.
-
-## Stack decisions
-
-| Layer | Choice | Reason |
-|---|---|---|
-| UI | React 19 + TypeScript + Vite 7 | Familiar component model; fast local development; typed UI data |
-| Styling | Tailwind CSS 4 + Lucide icons | Consistent responsive interface with little custom CSS |
-| Server | Express 5, Node.js 24, JavaScript ES modules | One language across the project; no Python environment to coordinate |
-| Real-time | Socket.IO 4, WebSocket transport | Events, acknowledgements, reconnection, and authenticated user rooms |
-| Storage | SQLite via Node's built-in `node:sqlite` | Real persistence without a database service or native addon build |
-| Authentication | Opaque HTTP-only cookie sessions + scrypt hashes | Revocable server-side sessions; no auth token stored in localStorage |
-| Encryption | Browser Web Crypto; AES-GCM, RSA-OAEP, ECDSA | Client-side message encryption/signatures; per-account recovery vault |
-| Validation | Zod | Validate untrusted HTTP and socket inputs on the server |
-| Tests | Node test runner + socket.io-client | Verify behavior using real HTTP and WebSocket connections |
-
-Tailwind uses its v4 Vite plugin and `@import "tailwindcss"`; old v3 `tailwindcss init -p` instructions do not apply to this repo.
-
-## Repository map
+## Project structure
 
 ```text
-commonroom/
-  frontend/
-    src/
-      components/       # Authentication, encryption setup, chat, creation dialog
-      hooks/useChat.ts   # Socket lifecycle, history, presence, delivery
-      hooks/useTheme.tsx # Theme preference and smooth transitions
-      hooks/useNotifications.ts # Toasts, optional sound/desktop alerts
-      lib/              # HTTP helper and TypeScript data contracts
-      App.tsx           # Session restoration and chat workspace
-      index.css         # Tailwind import, tokens, shared UI classes
-      main.tsx          # React entry point
-    public/theme-init.js # Apply theme before first paint
-    vite.config.ts      # Tailwind + React; HTTP and WebSocket proxy
-  backend/
-    src/
-      index.js          # Environment configuration, server lifecycle
-      app.js            # HTTP routes, socket handlers, authorization
-      auth.js           # Password hashes, session cookies, revocation
-      chat.js           # Membership checks and idempotent message writes
-      db.js             # SQLite schema, migration, backup, connection
-    tests/chat.test.js   # Auth, privacy, delivery, retry, persistence tests
-    .env.example        # Optional backend settings
-  shared/crypto.js      # Shared versioned Web Crypto message/vault protocol
-  docs/
-    ENCRYPTION.md       # Recovery, protocol, threat model and limits
-    PLAN.md             # 24-hour schedule, feature gates, team ownership
-    ARCHITECTURE.md      # Data flow, schema, REST and socket contracts
-    DEMO_CHECKLIST.md    # Acceptance checks and submission requirements
-  .github/workflows/ci.yml
-  START_WINDOWS.cmd     # Windows launcher (always uses the right folder)
-  START_HERE.txt         # Folder/install troubleshooting
-  package.json          # Root workspace commands
-  package-lock.json     # Exact dependency versions; commit this
+frontend/src/
+  App.tsx                 # Session restore and main layout
+  components/             # Chat, auth, friends, AI panel, calendar, dialogs
+  hooks/                  # useChat (sockets), useAssistant, useFriends, useNotifications, useTheme
+  lib/                    # API helper, device keys, encryption, file safety, media
+backend/src/
+  index.js                # Configuration and server start
+  app.js                  # HTTP routes and socket handlers
+  auth.js  chat.js  db.js # Sessions, membership checks, SQLite schema and migrations
+  assistant.js            # Common Room AI, reminders and tasks
+  friends.js              # Friend requests
+  moderation.js           # Reports, blocks, group-creator removal
+  gifs.js  memes.js       # GIPHY and Memer proxies
+backend/tests/            # Integration tests
+shared/crypto.js          # Encryption protocol shared by browser and server
+docs/                     # Architecture, encryption, demo checklist, screenshots
 ```
 
-## Implemented
+## Honest limits
 
-- Registration, login, logout, session restoration after refresh.
-- Unique usernames; search registered people by name or username.
-- One conversation per user pair; only participants can read or write it.
-- Messages saved before broadcast, server timestamps, authenticated sender IDs.
-- Message acknowledgement and safe manual retry using a client-generated UUID.
-- Latest 50 messages, older-history pagination, and latest-page reload after reconnect.
-- Typing indicators and multi-tab-aware online/offline status.
-- Slack-inspired navigation with a compact sidebar, named message rows, grouped consecutive messages, and a full-width composer.
-- Light/dark themes on every screen; system preference on first visit, saved manual choice, and cross-tab synchronization.
-- Ctrl+K people search, local conversation filtering, search within loaded messages, and conversation details.
-- Responsive Tailwind screens, empty states, connection errors, and send errors.
-- Basic HTTP/auth/socket throttling, input limits, same-origin browser checks, and production security headers.
+- The encryption is a hackathon prototype and hasn't been independently audited. There is no forward secrecy, so a leaked private key would expose old messages sent to that account.
+- The first time you chat with someone you trust the key the server gives you; fingerprint pinning catches later changes.
+- The server still sees metadata: who is in which chat, and when messages are sent.
+- AI replies, reminders and tasks are stored unencrypted on the server, and whatever you ask the AI is sent to Groq.
+- Reactions, profile pictures, display names and private notes are stored readable on the server.
+- It runs as one server process with SQLite, which fits a campus demo but isn't built to scale horizontally.
 
-A checkmark means **saved on the server**, not read by the recipient. Presence is visible to authenticated users, and names/usernames are searchable by them. Passwords, hashes, and session tokens are never included in public user responses.
+See [docs/ENCRYPTION.md](docs/ENCRYPTION.md) for the full threat model.
 
-## New in this version
+## Team
 
-- Persistent unread counts on conversations, notification bell, and browser title; an in-app toast for incoming messages outside the focused chat.
-- Optional gentle chime with a Test sound button. Desktop permission is requested only when enabled; notifications show sender/group, never message text. Desktop alerts need the app open and browser support; there is no closed-app push. Mobile browsers may fall back to in-app alerts. Multiple open tabs can each alert.
-- Smooth light/dark changes with reduced-motion support.
-- Encrypted groups of 3–256 people; named authors, group typing, history, and member fingerprints. Membership is fixed: create a new group for a different member set.
-- One compose entry point for finding people and creating groups; Ctrl+K opens the same dialog.
-- Client-side encryption for new direct/group messages, automatic browser key storage, optional recovery backup, immutable public identities, signatures, and first-seen fingerprint pinning. Read `docs/ENCRYPTION.md` before using or describing it.
+Built by **Team 8 bit Precision** for FIRST COMMIT 2026, IIT Mandi:
 
-The next milestone should prioritize reliability and an independent security review. Communities, calls, uploads, group membership editing, and AI summaries remain out of scope. A server-side AI feature cannot read new encrypted chat text; explicit client-side selection and consent would be needed.
-
-## Common Room AI
-
-A built-in assistant powered by Groq (or Google Gemini):
-
-- **Private chat with the AI**: open *Common Room AI* at the top of the sidebar (or *AI* in the left rail). Only you see that chat.
-- **Mention it in any chat**: write `@ai` (or `@gemini`) in a direct or group message. The answer appears in that chat for everyone in it.
-- **Privacy**: by default the AI only receives the message that mentions it. It reads the chat's last 30 messages only when you ask it to ("@ai summarize the chat", "@ai what did we decide above?"). A checkbox above the message box shows which applies, and you can change it before sending. Those messages are decrypted in your browser and sent to the AI service (Groq); AI answers are stored on the server and are not end-to-end encrypted.
-- **Reminders and tasks**: ask in any chat or in the AI chat ("@ai remind me to submit the deck at 11 pm", "add a task: record the demo"). Due reminders pop up in the app and appear in your AI chat.
-- **Reminders & tasks section**: in the sidebar (or *Tasks* in the left rail) lists everything, grouped into overdue, upcoming, no date and done. You can tick items off, delete them, or add new ones by hand.
-
-### Turning it on
-
-1. Get a free Groq API key at https://console.groq.com/keys
-2. In `backend`, create a text file named exactly `.env` (copy `backend/.env.example` if you like) with the line `GROQ_API_KEY=your-key`.
-3. Restart Commonroom (`npm run dev`). The backend terminal prints "Common Room AI is on (Groq, …)".
-
-The key is only used by the backend and never reaches the browser. Without a key the app works normally and the AI replies with a message explaining how to turn it on. `GROQ_MODEL` picks a different Groq model (default `openai/gpt-oss-120b`). If you prefer Google Gemini, leave `GROQ_API_KEY` empty and set `GEMINI_API_KEY` (and optionally `GEMINI_MODEL`, default `gemini-flash-latest`).
-
-## GIFs and Memer
-
-The emoji button has a **GIF** tab: search GIPHY (needs a free `GIPHY_API_KEY` from https://developers.giphy.com/dashboard/) or upload a GIF from your computer (no key needed).
-
-**Memer** is a just-for-fun meme bot. Type `@meme` (or `@meme ProgrammerHumor` for a specific subreddit) as a message, or press the laughing-face button, and a random Reddit meme from the free meme-api.com service is sent to everyone in the chat. No key is needed. NSFW and spoiler posts are skipped. The server fetches the meme, and your browser encrypts and sends it like a photo.
-
-## Configuration
-
-Defaults work without an `.env` file. To override them, copy `backend/.env.example` to `backend/.env` and edit it. In Windows PowerShell:
-
-```powershell
-Copy-Item backend/.env.example backend/.env
-```
-
-In Git Bash/macOS/Linux:
-
-```bash
-cp backend/.env.example backend/.env
-```
-
-| Variable | Meaning |
-|---|---|
-| `PORT` | Backend port; default 3001. If changed, update Vite's proxy too. |
-| `APP_ORIGIN` | Comma-separated browser origins allowed to write/connect, including scheme and port, no trailing slash. Defaults allow localhost/127.0.0.1 on 5173/3001. |
-| `DATABASE_PATH` | SQLite file; relative to `backend` when run with root npm scripts. |
-| `COOKIE_SECURE` | Set to `true` for an HTTPS deployment; false for local HTTP. |
-| `TRUST_PROXY` | Set to `1` only behind one trusted reverse proxy. |
-| `GROQ_API_KEY` | Turns on Common Room AI. Get one at https://console.groq.com/keys. Keep it out of Git. |
-| `GROQ_MODEL` | Optional Groq model; default `openai/gpt-oss-120b`. |
-| `GEMINI_API_KEY` / `GEMINI_MODEL` | Optional alternative to Groq, used only when `GROQ_API_KEY` is empty. |
-| `GIPHY_API_KEY` | Turns on GIF search. Free key at https://developers.giphy.com/dashboard/. |
-
-No `.env` is needed in the frontend. Do not put private keys in Vite variables; frontend code is public.
-
-## Scope and deployment limits
-
-This starter targets **one backend process** and a small hackathon demo. SQLite is appropriate for this scope. It is not a horizontally scaled chat system. For deployment, use a Node host with WebSocket support and persistent disk; serve the built UI from the same origin. Set APP_ORIGIN to its exact HTTPS origin and COOKIE_SECURE=true. A static-only frontend host cannot run this backend. Hosting is optional in the brief and no deployment is created here.
-
-- No AI, account/password recovery, identity reset/rotation, or account deletion yet.
-- New message text is encrypted before transmission. Metadata (members, group titles, sender, timing, sizes) remains visible to the server. Older history and migration backups remain plaintext.
-- The encryption protocol is unaudited and has no forward secrecy. Compromised client code/devices or a stolen recovery key can expose messages. See ENCRYPTION.md.
-- Sessions last seven days. Logout revokes only the current session and disconnects sockets for it.
-- Typing/presence are ephemeral; messages, accounts, conversations, and sessions persist.
-- Reconnection reloads the newest 50 messages as a contiguous page; older messages remain accessible via “Load earlier messages.”
-- An unconfirmed send can be safely retried while the same conversation stays open and the draft is unchanged. Drafts and retry state are in memory; there is no durable offline outbox.
-- Throttles are basic per-IP HTTP/per-socket controls, not a distributed abuse prevention system.
-- Version 3 includes a migration for the previous starter schema. Future schema changes still require explicit migrations.
-- Dependency installation needs internet; running the app needs no external service.
-
-## Git: your first checkpoint
-
-This folder is ready for Git; no remote repository has been created. Create a **private** GitHub repository, with no generated README, then run:
-
-```bash
-git init -b main
-git add .
-git commit -m "feat: bootstrap authenticated realtime chat"
-git remote add origin YOUR_PRIVATE_REPO_URL
-git push -u origin main
-```
-
-Replace YOUR_PRIVATE_REPO_URL with the actual URL. Keep the repository private until the hackathon ends, as required by the brief. Do not commit recovery keys, `.env`, `node_modules`, or SQLite data. The supplied `.gitignore` excludes these.
-
-## References
-
-- Official Tailwind Vite setup: https://tailwindcss.com/docs/installation/using-vite
-- Socket.IO delivery guarantees: https://socket.io/docs/v4/delivery-guarantees/
-- Node 24 SQLite API: https://nodejs.org/docs/latest-v24.x/api/sqlite.html
-- Source requirements: supplied FIRST COMMIT problem statement, sections 02, 04, 08, 09.
+- Abir Shandilya
+- Aditya Ranjan
+- Ojasv Jain
+- Lohitaksha Rohila
