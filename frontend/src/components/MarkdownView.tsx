@@ -17,7 +17,7 @@ export default function MarkdownView({ content }: { content: string }) {
       row.split('|').map(cell => cell.trim()).filter((_, idx, arr) => idx > 0 && idx < arr.length - 1)
     );
     const header = rows[0];
-    const dataRows = rows.slice(2); // Skip separator row (e.g. |---|---|)
+    const dataRows = rows.slice(2);
 
     elements.push(
       <div key={`tbl-${key}`} className="my-2 max-w-full overflow-x-auto rounded-lg border border-line">
@@ -47,7 +47,6 @@ export default function MarkdownView({ content }: { content: string }) {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
-    // Handle Code Blocks
     if (line.trim().startsWith('```')) {
       if (inCodeBlock) {
         elements.push(
@@ -68,7 +67,6 @@ export default function MarkdownView({ content }: { content: string }) {
       continue;
     }
 
-    // Handle Tables
     if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
       tableBuffer.push(line.trim());
       continue;
@@ -76,40 +74,29 @@ export default function MarkdownView({ content }: { content: string }) {
       flushTable(i);
     }
 
-    // Headings
     if (line.startsWith('### ')) {
       elements.push(<h4 key={i} className="mt-3 mb-1 text-sm font-bold text-ink">{renderInline(line.slice(4))}</h4>);
     } else if (line.startsWith('## ')) {
       elements.push(<h3 key={i} className="mt-3.5 mb-1 text-base font-bold text-ink">{renderInline(line.slice(3))}</h3>);
     } else if (line.startsWith('# ')) {
       elements.push(<h2 key={i} className="mt-4 mb-1.5 text-lg font-bold text-ink">{renderInline(line.slice(2))}</h2>);
-    } 
-    // Horizontal Rule
-    else if (line.trim() === '---' || line.trim() === '***') {
+    } else if (line.trim() === '---' || line.trim() === '***') {
       elements.push(<hr key={i} className="my-2.5 border-line" />);
-    } 
-    // Unordered List
-    else if (line.match(/^[-*]\s+/)) {
+    } else if (line.match(/^[-*]\s+/)) {
       elements.push(
         <li key={i} className="ml-4 list-disc text-[13px] leading-relaxed">
           {renderInline(line.replace(/^[-*]\s+/, ''))}
         </li>
       );
-    } 
-    // Ordered List
-    else if (line.match(/^\d+\.\s+/)) {
+    } else if (line.match(/^\d+\.\s+/)) {
       elements.push(
         <li key={i} className="ml-4 list-decimal text-[13px] leading-relaxed">
           {renderInline(line.replace(/^\d+\.\s+/, ''))}
         </li>
       );
-    } 
-    // Empty Line
-    else if (!line.trim()) {
+    } else if (!line.trim()) {
       elements.push(<div key={i} className="h-1.5" />);
-    } 
-    // Regular paragraph
-    else {
+    } else {
       elements.push(<p key={i} className="text-[13px] leading-relaxed">{renderInline(line)}</p>);
     }
   }
@@ -119,48 +106,93 @@ export default function MarkdownView({ content }: { content: string }) {
   return <div className="space-y-0.5">{elements}</div>;
 }
 
+function cleanMath(expr: string): string {
+  return expr
+    .replace(/\\cdot/g, '·')
+    .replace(/\\times/g, '×')
+    .replace(/\\forall/g, '∀')
+    .replace(/\\exists/g, '∃')
+    .replace(/\\in/g, '∈')
+    .replace(/\\notin/g, '∉')
+    .replace(/\\subset/g, '⊂')
+    .replace(/\\subseteq/g, '⊆')
+    .replace(/\\mathbb\{R\}/g, 'ℝ')
+    .replace(/\\mathbb\{Z\}/g, 'ℤ')
+    .replace(/\\mathbb\{N\}/g, 'ℕ')
+    .replace(/\\mathbb\{Q\}/g, 'ℚ')
+    .replace(/\\mathbf\{([^}]+)\}/g, '$1')
+    .replace(/\\math\w+\{([^}]+)\}/g, '$1')
+    .replace(/\\,/g, ' ')
+    .replace(/\\;/g, ' ')
+    .replace(/\\:/g, ' ')
+    .replace(/\\!/g, '')
+    .replace(/\\/g, '')
+    .trim();
+}
+
 function renderInline(text: string): ReactNode {
-  // Regex parsing for bold (**), italic (* or _), inline code (`), and bold-italic (***)
   const tokens: ReactNode[] = [];
   let remaining = text;
   let idx = 0;
 
   while (remaining) {
-    // Inline code `code`
-    const codeMatch = remaining.match(/^(.*?)`([^`]+)`(.*)$/);
-    // Bold **text**
-    const boldMatch = remaining.match(/^(.*?)\*\*([^*]+)\*\*(.*)$/);
-    // Italic *text*
-    const italicMatch = remaining.match(/^(.*?)\*([^*]+)\*(.*)$/);
+    // Math syntax: \( ... \) or \[ ... \] or $ ... $
+    const mathParen = remaining.match(/^(.*?)\\?\((.*?)\\?\)(.*)$/s);
+    const mathBracket = remaining.match(/^(.*?)\\?\[(.*?)\\?\](.*)$/s);
+    const codeMatch = remaining.match(/^(.*?)`([^`]+)`(.*)$/s);
+    const boldMatch = remaining.match(/^(.*?)\*\*([^*]+)\*\*(.*)$/s);
+    const italicMatch = remaining.match(/^(.*?)\*([^*]+)\*(.*)$/s);
 
-    let matchType = null;
+    let matchType: 'math' | 'code' | 'bold' | 'italic' | null = null;
     let earliestPos = Infinity;
+    let chosenMatch: RegExpMatchArray | null = null;
 
+    if (mathParen && mathParen[1].length < earliestPos) {
+      earliestPos = mathParen[1].length;
+      matchType = 'math';
+      chosenMatch = mathParen;
+    }
+    if (mathBracket && mathBracket[1].length < earliestPos) {
+      earliestPos = mathBracket[1].length;
+      matchType = 'math';
+      chosenMatch = mathBracket;
+    }
     if (codeMatch && codeMatch[1].length < earliestPos) {
       earliestPos = codeMatch[1].length;
       matchType = 'code';
+      chosenMatch = codeMatch;
     }
     if (boldMatch && boldMatch[1].length < earliestPos) {
       earliestPos = boldMatch[1].length;
       matchType = 'bold';
+      chosenMatch = boldMatch;
     }
     if (italicMatch && italicMatch[1].length < earliestPos) {
       earliestPos = italicMatch[1].length;
       matchType = 'italic';
+      chosenMatch = italicMatch;
     }
 
-    if (matchType === 'code' && codeMatch) {
-      if (codeMatch[1]) tokens.push(<span key={idx++}>{codeMatch[1]}</span>);
-      tokens.push(<code key={idx++} className="rounded bg-soft px-1.5 py-0.5 text-[11px] font-mono text-accent">{codeMatch[2]}</code>);
-      remaining = codeMatch[3];
-    } else if (matchType === 'bold' && boldMatch) {
-      if (boldMatch[1]) tokens.push(<span key={idx++}>{boldMatch[1]}</span>);
-      tokens.push(<strong key={idx++} className="font-semibold text-ink">{boldMatch[2]}</strong>);
-      remaining = boldMatch[3];
-    } else if (matchType === 'italic' && italicMatch) {
-      if (italicMatch[1]) tokens.push(<span key={idx++}>{italicMatch[1]}</span>);
-      tokens.push(<em key={idx++} className="italic">{italicMatch[2]}</em>);
-      remaining = italicMatch[3];
+    if (matchType === 'math' && chosenMatch) {
+      if (chosenMatch[1]) tokens.push(<span key={idx++}>{chosenMatch[1]}</span>);
+      tokens.push(
+        <span key={idx++} className="mx-0.5 rounded bg-soft/80 px-1 py-0.2 font-mono text-[11px] font-medium text-accent">
+          {cleanMath(chosenMatch[2])}
+        </span>
+      );
+      remaining = chosenMatch[3];
+    } else if (matchType === 'code' && chosenMatch) {
+      if (chosenMatch[1]) tokens.push(<span key={idx++}>{chosenMatch[1]}</span>);
+      tokens.push(<code key={idx++} className="rounded bg-soft px-1.5 py-0.5 text-[11px] font-mono text-accent">{chosenMatch[2]}</code>);
+      remaining = chosenMatch[3];
+    } else if (matchType === 'bold' && chosenMatch) {
+      if (chosenMatch[1]) tokens.push(<span key={idx++}>{chosenMatch[1]}</span>);
+      tokens.push(<strong key={idx++} className="font-semibold text-ink">{chosenMatch[2]}</strong>);
+      remaining = chosenMatch[3];
+    } else if (matchType === 'italic' && chosenMatch) {
+      if (chosenMatch[1]) tokens.push(<span key={idx++}>{chosenMatch[1]}</span>);
+      tokens.push(<em key={idx++} className="italic">{chosenMatch[2]}</em>);
+      remaining = chosenMatch[3];
     } else {
       tokens.push(<span key={idx++}>{remaining}</span>);
       break;

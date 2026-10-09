@@ -41,7 +41,7 @@ async function resolveActiveModel(apiKey) {
   if (selectedModel) return selectedModel;
 
   try {
-    const res = await fetch('https://api.groq.com/openai/v1/models', {
+    const res = await fetch('[https://api.groq.com/openai/v1/models](https://api.groq.com/openai/v1/models)', {
       headers: { Authorization: `Bearer ${apiKey}` }
     });
     if (res.ok) {
@@ -88,14 +88,14 @@ async function callLlm(prompt, context = []) {
   const messages = [
     {
       role: 'system',
-      content: 'You are Commonroom Campus AI, a friendly, concise, and helpful campus assistant for students. Provide direct, practical answers formatted in clean markdown.'
+      content: 'You are Commonroom Campus AI, a friendly, concise, and helpful campus assistant for university students. Answer in clean GitHub-flavored Markdown. For mathematics and equations, use clean standard Unicode characters (like ·, ∀, ∈, ℤ, ℝ, ², ⁻¹) or inline code blocks (`x * y`) rather than raw LaTeX backslash commands.'
     },
     ...context.map(c => ({ role: c.role === 'user' ? 'user' : 'assistant', content: c.text })),
     { role: 'user', content: prompt }
   ];
 
   try {
-    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    const res = await fetch('[https://api.groq.com/openai/v1/chat/completions](https://api.groq.com/openai/v1/chat/completions)', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
@@ -172,7 +172,6 @@ export async function handleBotTrigger({ db, io, conversationId, message, sender
 
     const botClientId = randomUUID();
 
-    // Ensure the sender (the bot itself) is included in the members list passed to encryptMessage
     const recipientMembers = [...members.map(m => ({ id: m.id, identity: m.identity }))];
     if (!recipientMembers.some(m => m.id === BOT_USER_ID)) {
       recipientMembers.push({ id: BOT_USER_ID, identity: botIdentity.publicIdentity });
