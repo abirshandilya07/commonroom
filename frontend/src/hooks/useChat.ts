@@ -1,7 +1,8 @@
 import {useCallback,useEffect,useRef,useState} from 'react';
 import {io,type Socket} from 'socket.io-client';
 import {api,ApiError,post,upload} from '../lib/api';
-import {encodeBody,encryptFile,kindOf,MAX_ATTACHMENT_BYTES} from '../lib/media';
+import {encodeBody,encryptFile,MAX_ATTACHMENT_BYTES} from '../lib/media';
+import {checkOutgoing} from '../lib/fileSafety';
 import {decrypt,encrypt,type UnlockedIdentity} from '../lib/encryption';
 import type {Attachment,Conversation,Message,MessagePage,Presence,Reaction,SendAck,User,WireMessage} from '../lib/types';
 import type {Envelope} from '../../../shared/crypto';
@@ -13,12 +14,14 @@ export function useChat(user:User,identity:UnlockedIdentity,onExpired:()=>void,o
   const [online,setOnline]=useState<Record<string,Presence>>({}),[connected,setConnected]=useState(false),[error,setError]=useState(''),[loading,setLoading]=useState(false);
   const [previews,setPreviews]=useState<Record<string,{id:number;text:string}>>({});
   const [typing,setTyping]=useState<Record<string,Record<string,{name:string;until:number}>>>({});
+  const [socketState,setSocketState]=useState<Socket|null>(null);
   const socket=useRef<Socket|null>(null),activeRef=useRef(activeId),conversationRef=useRef(conversations),incomingRef=useRef(onIncoming),profileRef=useRef(onProfileChanged);
   activeRef.current=activeId;incomingRef.current=onIncoming;profileRef.current=onProfileChanged;
-  const pending=useRef(new Map<string,{body:string;file?:Blob;encrypted:Envelope;attachmentId?:string}>());
+  const pending=useRef(new Map<string,{body:string;file?:Blob;encrypted:Envelope;attachmentId?:string;payload?:string}>());
+  const decodeBodyForResend=(entry:{body:string;payload?:string})=>entry.payload??entry.body;
   const fail=useCallback((e:unknown)=>{if(e instanceof ApiError&&e.status===401)onExpired();else setError(e instanceof Error?e.message:'Unable to connect.');},[onExpired]);
   const preview=useCallback((m:Message,c:Conversation)=>{
-    const media=m.attachment?{image:'📷 Photo',video:'🎥 Video',audio:'🎤 Voice note'}[m.attachment.kind]:'';
+    const media=m.attachment?{image:'📷 Photo',video:'🎥 Video',audio:'🎤 Voice note',file:`📎 ${m.attachment.name}`}[m.attachment.kind]:'';
     const text=m.deleted?'Message deleted':m.decryptionError?'Encrypted message':[media,m.body].filter(Boolean).join(' · ')||'Message';
     const who=m.senderId===user.id?'You':c.kind==='group'?c.members.find(x=>x.id===m.senderId)?.name.split(' ')[0]:'';
     setPreviews(current=>current[c.id]&&current[c.id].id>m.id?current:{...current,[c.id]:{id:m.id,text:who?`${who}: ${text}`:text}});
@@ -44,7 +47,7 @@ export function useChat(user:User,identity:UnlockedIdentity,onExpired:()=>void,o
     setHasMore(current=>({...current,[id]:data.hasMore}));
   },[identity,findConversation]);
   useEffect(()=>{
-    const connection=io({transports:['websocket'],autoConnect:false});socket.current=connection;
+    const connection=io({transports:['websocket'],autoConnect:false});socket.current=connection;setSocketState(connection);
     let alive=true,queue=Promise.resolve();
     connection.on('connect',()=>{setConnected(true);setError('');void refreshConversations().then(()=>{if(activeRef.current)return refreshHistory(activeRef.current);}).catch(fail);});
     connection.on('disconnect',(reason)=>{setConnected(false);setOnline({});setTyping({});if(reason==='io server disconnect')onExpired();});
@@ -87,7 +90,7 @@ export function useChat(user:User,identity:UnlockedIdentity,onExpired:()=>void,o
     connection.on('typing:update',(e:{conversationId:string;userId:string;name:string;typing:boolean})=>setTyping(current=>({...current,[e.conversationId]:{...current[e.conversationId],[e.userId]:{name:e.name,until:e.typing?Date.now()+3500:0}}})));
     connection.connect();
     const timer=setInterval(()=>setTyping(current=>Object.fromEntries(Object.entries(current).map(([id,people])=>[id,Object.fromEntries(Object.entries(people).filter(([,p])=>p.until>Date.now()))]))),1000);
-    return()=>{alive=false;clearInterval(timer);connection.removeAllListeners();connection.disconnect();socket.current=null;};
+    return()=>{alive=false;clearInterval(timer);connection.removeAllListeners();connection.disconnect();socket.current=null;setSocketState(null);};
   },[identity,user.id,fail,refreshConversations,refreshHistory,onExpired,patchConversations,preview]);
   useEffect(()=>{if(!activeId)return;let cancelled=false;setLoading(true);void refreshHistory(activeId).catch(fail).finally(()=>{if(!cancelled)setLoading(false);});return()=>{cancelled=true;};},[activeId,refreshHistory,fail]);
   const lastRead=useRef(new Map<string,number>());
@@ -100,8 +103,17 @@ export function useChat(user:User,identity:UnlockedIdentity,onExpired:()=>void,o
     };read();window.addEventListener('focus',read);document.addEventListener('visibilitychange',read);return()=>{window.removeEventListener('focus',read);document.removeEventListener('visibilitychange',read);};
   },[activeId,latest,loading,fail]);
   async function startChat(peer:User){const {id}=await post<{id:string}>('/conversations',{userId:peer.id});await refreshConversations();setActiveId(id);}
+  async function addMembers(conversationId:string,memberIds:string[]){await post(`/groups/${conversationId}/members`,{memberIds});await refreshConversations();}
+  async function removeMember(conversationId:string,userId:string){await api(`/groups/${conversationId}/members/${userId}`,{method:'DELETE'});if(userId===user.id)setActiveId(null);await refreshConversations();}
   async function createGroup(title:string,memberIds:string[]){const {id}=await post<{id:string}>('/groups',{title,memberIds});await refreshConversations();setActiveId(id);}
   async function older(){if(!activeId||!messages[activeId]?.length)return;const id=activeId,c=await findConversation(id),data=await api<MessagePage>(`/conversations/${id}/messages?before=${messages[id][0].id}`);const decoded=await Promise.all(data.messages.map(m=>decrypt(identity,m,c)));setMessages(current=>({...current,[id]:merge(decoded,current[id]||[])}));setHasMore(current=>({...current,[id]:data.hasMore}));}
+  // Message search runs in the browser, so "search all history" first loads and decrypts every earlier page.
+  async function loadAll(){
+    if(!activeId)return;const id=activeId,c=await findConversation(id);
+    let before=messages[id]?.[0]?.id,more=true,pages=0;
+    while(more&&before&&pages++<40){const data=await api<MessagePage>(`/conversations/${id}/messages?before=${before}`);const decoded=await Promise.all(data.messages.map(m=>decrypt(identity,m,c)));setMessages(current=>({...current,[id]:merge(decoded,current[id]||[])}));more=data.hasMore;before=decoded[0]?.id;}
+    setHasMore(current=>({...current,[id]:more}));
+  }
   function emitAck<T>(event:string,payload:unknown,timeoutMessage='Delivery not confirmed. Retry unchanged to check safely.'){
     if(!socket.current?.connected)throw new Error('You’re offline. Reconnect and retry.');
     return new Promise<T>((resolve,reject)=>socket.current!.timeout(7000).emit(event,payload,(err:Error|null,result:T)=>err?reject(new Error(timeoutMessage)):resolve(result)));
@@ -116,18 +128,25 @@ export function useChat(user:User,identity:UnlockedIdentity,onExpired:()=>void,o
     if(!entry){
       let attachment:Attachment|undefined,attachmentId:string|undefined;
       if(outgoing){
-        const mime=outgoing.file.type||'application/octet-stream',kind=kindOf(mime);
-        if(!kind)throw new Error('Only images, videos and voice notes can be sent.');
         if(outgoing.file.size>MAX_ATTACHMENT_BYTES)throw new Error('Files can be up to 25 MB.');
+        const {mime,kind,name}=await checkOutgoing(outgoing.file,outgoing.name);
         // Encrypt in the browser, upload opaque bytes, and keep the key inside the encrypted message.
         const sealed=await encryptFile(outgoing.file);
         attachmentId=(await upload<{id:string}>(`/conversations/${conversationId}/attachments`,sealed.ciphertext,'application/octet-stream')).id;
-        attachment={id:attachmentId,key:sealed.key,iv:sealed.iv,mime,name:outgoing.name,size:outgoing.file.size,kind,duration:outgoing.duration};
+        attachment={id:attachmentId,key:sealed.key,iv:sealed.iv,mime,name,size:outgoing.file.size,kind,duration:outgoing.duration};
       }
-      entry={body,file:outgoing?.file,attachmentId,encrypted:await encrypt(identity,c,clientId,encodeBody(body,attachment))};
+      const payload=encodeBody(body,attachment);
+      entry={body,file:outgoing?.file,attachmentId,payload,encrypted:await encrypt(identity,c,clientId,payload)};
       pending.current.set(clientId,entry);
     }
-    const ack=await emitAck<SendAck>('message:send',{conversationId,clientId,encrypted:entry.encrypted,...(entry.attachmentId?{attachmentId:entry.attachmentId}:{})});
+    let ack=await emitAck<SendAck>('message:send',{conversationId,clientId,encrypted:entry.encrypted,...(entry.attachmentId?{attachmentId:entry.attachmentId}:{})});
+    // Someone joined or left while this was being prepared: re-encrypt for the current members once.
+    if(!ack.ok&&ack.error==='Encrypt for exactly the conversation members.'){
+      const fresh=(await refreshConversations()).find(x=>x.id===conversationId);
+      if(!fresh)throw new Error('You are no longer in this conversation.');
+      entry={...entry,encrypted:await encrypt(identity,fresh,clientId,decodeBodyForResend(entry))};pending.current.set(clientId,entry);
+      ack=await emitAck<SendAck>('message:send',{conversationId,clientId,encrypted:entry.encrypted,...(entry.attachmentId?{attachmentId:entry.attachmentId}:{})});
+    }
     if(!ack.ok)throw new Error(ack.error);
     const sent=await decrypt(identity,ack.message,c);storeMessage(conversationId,sent);preview(sent,c);pending.current.delete(clientId);
   }
@@ -160,6 +179,6 @@ export function useChat(user:User,identity:UnlockedIdentity,onExpired:()=>void,o
   }
   const conversationsWithPreview=conversations.map(c=>previews[c.id]?{...c,lastMessage:previews[c.id].text}:c);
   const typingNames=activeId?Object.values(typing[activeId]||{}).filter(p=>p.until>Date.now()).map(p=>p.name):[];
-  return {conversations:conversationsWithPreview,activeId,setActiveId,messages:activeId?messages[activeId]||[]:[],hasMore:activeId?!!hasMore[activeId]:false,typing:typingNames.length?`${typingNames.join(', ')} ${typingNames.length===1?'is':'are'} typing…`:'',online,connected,error,setError,loading,startChat,createGroup,older,send,edit,remove,react,refreshConversations,
-    emitTyping};
+  return {conversations:conversationsWithPreview,activeId,setActiveId,messages:activeId?messages[activeId]||[]:[],hasMore:activeId?!!hasMore[activeId]:false,typing:typingNames.length?`${typingNames.join(', ')} ${typingNames.length===1?'is':'are'} typing…`:'',online,connected,error,setError,loading,startChat,createGroup,addMembers,removeMember,older,loadAll,send,edit,remove,react,refreshConversations,
+    emitTyping,socket:socketState};
 }

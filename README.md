@@ -54,6 +54,8 @@ The updated ZIP removes this extra nested folder. Open the directory that direct
 
 ## Version 2 (FIRST COMMIT build)
 
+- **Document sharing with file safety.** Share PDFs, Word/Excel/PowerPoint, text, CSV and ZIP files as well as media. Before encryption the sender's browser blocks executable and script types (.exe, .bat, .js, .html, .svg …), rejects files whose bytes don't match their type (for example a Windows program renamed to .pdf), and cleans file names. The receiver's browser repeats the check after decryption, and documents are always downloaded rather than rendered. The server can't scan content because it only ever sees ciphertext.
+- **Group members.** The group creator can add and remove people from Conversation details; anyone can leave (the creator role passes on if the creator leaves). Each message is encrypted for the members at send time, so new members see "Sent before you joined" for earlier messages and removed members can't read new ones.
 - **Images, videos and voice notes.** Attach with the paperclip, or press the mic to record (live level animation, up to 5 minutes). Files are encrypted in the browser with a fresh AES-GCM key before upload; the key travels inside the encrypted message, so the server stores only opaque bytes (`backend/data/uploads/`). Limit 25 MB per file.
 - **Reactions, editing and deleting.** Hover a message for the toolbar. Edits are re-encrypted and re-signed by the sender and marked "(edited)". Deleting removes the ciphertext, reactions and attachment for everyone.
 - **Profiles and settings.** Click a name or avatar to see a person's name, username, join date and status, and to keep a private note about them (only you can see it). The gear icon opens your own settings: change your display name and profile picture.
@@ -87,7 +89,7 @@ For an unmodified previous starter, extract this ZIP into a new folder. Copy you
 
 On the first launch against the previous two-user schema, the app makes a consistent SQLite backup named `commonroom.sqlite.pre-v3-<timestamp>.sqlite`, migrates direct conversations into memberships, and preserves existing messages. The backup contains old plaintext history; keep it private. After upgrading, each account must complete encryption setup. Old messages remain clearly labelled **Earlier · unencrypted**; only new messages are encrypted. There is no automatic rollback; stop the app and restore the backup with the old code if necessary.
 
-Groups now support 3–256 people with fixed membership. Communities remain deferred. “Commonroom” is the app name, not a multi-tenant workspace implementation.
+Groups support 3–256 people; the creator can add or remove members. Communities remain deferred. “Commonroom” is the app name, not a multi-tenant workspace implementation.
 
 ## Stack decisions
 
@@ -171,6 +173,24 @@ A checkmark means **saved on the server**, not read by the recipient. Presence i
 
 The next milestone should prioritize reliability and an independent security review. Communities, calls, uploads, group membership editing, and AI summaries remain out of scope. A server-side AI feature cannot read new encrypted chat text; explicit client-side selection and consent would be needed.
 
+## Common Room AI
+
+A built-in assistant powered by Groq (or Google Gemini):
+
+- **Private chat with the AI**: open *Common Room AI* at the top of the sidebar (or *AI* in the left rail). Only you see that chat.
+- **Mention it in any chat**: write `@ai` (or `@gemini`) in a direct or group message. The answer appears in that chat for everyone in it.
+- **Privacy**: by default the AI only receives the message that mentions it. It reads the chat's last 30 messages only when you ask it to ("@ai summarize the chat", "@ai what did we decide above?"). A checkbox above the message box shows which applies, and you can change it before sending. Those messages are decrypted in your browser and sent to the AI service (Groq); AI answers are stored on the server and are not end-to-end encrypted.
+- **Reminders and tasks**: ask in any chat or in the AI chat ("@ai remind me to submit the deck at 11 pm", "add a task: record the demo"). Due reminders pop up in the app and appear in your AI chat.
+- **Reminders & tasks section**: in the sidebar (or *Tasks* in the left rail) lists everything, grouped into overdue, upcoming, no date and done. You can tick items off, delete them, or add new ones by hand.
+
+### Turning it on
+
+1. Get a free Groq API key at https://console.groq.com/keys
+2. In `backend`, create a text file named exactly `.env` (copy `backend/.env.example` if you like) with the line `GROQ_API_KEY=your-key`.
+3. Restart Commonroom (`npm run dev`). The backend terminal prints "Common Room AI is on (Groq, …)".
+
+The key is only used by the backend and never reaches the browser. Without a key the app works normally and the AI replies with a message explaining how to turn it on. `GROQ_MODEL` picks a different Groq model (default `openai/gpt-oss-120b`). If you prefer Google Gemini, leave `GROQ_API_KEY` empty and set `GEMINI_API_KEY` (and optionally `GEMINI_MODEL`, default `gemini-flash-latest`).
+
 ## Configuration
 
 Defaults work without an `.env` file. To override them, copy `backend/.env.example` to `backend/.env` and edit it. In Windows PowerShell:
@@ -192,6 +212,9 @@ cp backend/.env.example backend/.env
 | `DATABASE_PATH` | SQLite file; relative to `backend` when run with root npm scripts. |
 | `COOKIE_SECURE` | Set to `true` for an HTTPS deployment; false for local HTTP. |
 | `TRUST_PROXY` | Set to `1` only behind one trusted reverse proxy. |
+| `GROQ_API_KEY` | Turns on Common Room AI. Get one at https://console.groq.com/keys. Keep it out of Git. |
+| `GROQ_MODEL` | Optional Groq model; default `openai/gpt-oss-120b`. |
+| `GEMINI_API_KEY` / `GEMINI_MODEL` | Optional alternative to Groq, used only when `GROQ_API_KEY` is empty. |
 
 No `.env` is needed in the frontend. Do not put private keys in Vite variables; frontend code is public.
 

@@ -18,6 +18,8 @@ export async function pinIdentity(owner:string, member:Member) {
 export async function decrypt(identity:UnlockedIdentity, wire:WireMessage, conversation:Conversation):Promise<Message> {
   if(wire.deleted) return {...wire,body:''};
   if(!wire.encrypted) return {...wire,body:wire.body||'',legacy:true};
+  // Group messages are encrypted for the members at send time; later joiners can't read them.
+  if(!wire.encrypted.recipients.some(r=>r.userId===identity.userId)) return {...wire,body:'Sent before you joined this group.',beforeJoin:true};
   try {
     const member=conversation.members.find(m=>m.id===wire.senderId);
     if(!member?.identity) throw new Error('Sender identity not available.');

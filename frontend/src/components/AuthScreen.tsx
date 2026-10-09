@@ -3,6 +3,7 @@ import { MessageSquare, ArrowRight, Check, Zap, ShieldCheck } from 'lucide-react
 import { post } from '../lib/api';
 import type { Me } from '../lib/types';
 import ThemeToggle from './ThemeToggle';
+import {rememberPassword} from '../lib/passwordBackup';
 export default function AuthScreen({onAuth}: {onAuth: (user: Me) => void}) {
   const [register, setRegister] = useState(true);
   const [error, setError] = useState('');
@@ -10,7 +11,7 @@ export default function AuthScreen({onAuth}: {onAuth: (user: Me) => void}) {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy(true); setError('');
     const fields = Object.fromEntries(new FormData(event.currentTarget));
-    try { const {user} = await post<{user: Me}>(`/auth/${register ? 'register' : 'login'}`, fields); onAuth(user); }
+    try { const {user} = await post<{user: Me}>(`/auth/${register ? 'register' : 'login'}`, fields); rememberPassword(String(fields.password ?? '')); onAuth(user); }
     catch (e) { setError(e instanceof Error ? e.message : 'Unable to connect.'); }
     finally { setBusy(false); }
   }

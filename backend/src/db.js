@@ -43,7 +43,20 @@ export function openDatabase(filename) {
     CREATE TABLE IF NOT EXISTS notes(owner_id TEXT NOT NULL REFERENCES users(id),target_id TEXT NOT NULL REFERENCES users(id),body TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(owner_id,target_id));
     CREATE TABLE IF NOT EXISTS reactions(message_id INTEGER NOT NULL REFERENCES messages(id),user_id TEXT NOT NULL REFERENCES users(id),emoji TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(message_id,user_id,emoji));
     CREATE TABLE IF NOT EXISTS attachments(id TEXT PRIMARY KEY,conversation_id TEXT NOT NULL REFERENCES conversations(id),uploader_id TEXT NOT NULL REFERENCES users(id),size INTEGER NOT NULL,created_at TEXT NOT NULL);`);
-  db.exec('PRAGMA user_version=4');
+  // v5: Common Room AI chat history and reminders/tasks.
+  db.exec(`CREATE TABLE IF NOT EXISTS ai_messages(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id TEXT NOT NULL REFERENCES users(id),conversation_id TEXT REFERENCES conversations(id),role TEXT NOT NULL CHECK(role IN ('user','assistant')),body TEXT NOT NULL,context_count INTEGER NOT NULL DEFAULT 0,items TEXT,created_at TEXT NOT NULL);
+    CREATE INDEX IF NOT EXISTS ai_messages_owner ON ai_messages(user_id,conversation_id,id);
+    CREATE INDEX IF NOT EXISTS ai_messages_conversation ON ai_messages(conversation_id,id);
+    CREATE TABLE IF NOT EXISTS ai_items(id TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id),conversation_id TEXT REFERENCES conversations(id),kind TEXT NOT NULL CHECK(kind IN ('reminder','task')),title TEXT NOT NULL,due_at TEXT,done INTEGER NOT NULL DEFAULT 0,notified_at TEXT,created_at TEXT NOT NULL);
+    CREATE INDEX IF NOT EXISTS ai_items_owner ON ai_items(user_id,done);
+    CREATE INDEX IF NOT EXISTS ai_items_due ON ai_items(done,notified_at,due_at);`);
+  // v6: moderation (blocks and message reports).
+  db.exec(`CREATE TABLE IF NOT EXISTS blocks(blocker_id TEXT NOT NULL REFERENCES users(id),blocked_id TEXT NOT NULL REFERENCES users(id),created_at TEXT NOT NULL,PRIMARY KEY(blocker_id,blocked_id));
+    CREATE TABLE IF NOT EXISTS reports(id TEXT PRIMARY KEY,reporter_id TEXT NOT NULL REFERENCES users(id),message_id INTEGER NOT NULL REFERENCES messages(id),conversation_id TEXT NOT NULL REFERENCES conversations(id),reason TEXT NOT NULL,excerpt TEXT,created_at TEXT NOT NULL,resolved_at TEXT,UNIQUE(reporter_id,message_id));
+    CREATE INDEX IF NOT EXISTS reports_conversation ON reports(conversation_id,resolved_at);`);
+  // v7: password-wrapped backup of the device recovery secret.
+  addColumn('users','key_backup','TEXT');
+  db.exec('PRAGMA user_version=7');
   if(db.prepare('PRAGMA foreign_key_check').all().length) throw new Error('Database migration integrity check failed.');
   return db;
 }

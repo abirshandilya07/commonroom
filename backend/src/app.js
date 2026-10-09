@@ -13,6 +13,9 @@ import { openDatabase } from './db.js';
 import { hashPassword, verifyPassword, publicUser, findSession, createSession, clearSession } from './auth.js';
 import { conversationFor, saveMessage, membersFor, identityInput, viewsFor, editMessage, deleteMessage, reactionsFor, avatarUrl } from './chat.js';
 
+import { registerAssistant } from './assistant.js';
+import { registerModeration } from './moderation.js';
+import { registerGifs } from './gifs.js';
 import {MAX_GROUP_MEMBERS, MAX_ENCRYPTED_PACKET_BYTES} from '../../shared/limits.js';
 
 const credentials = z.object({username: z.string().trim().toLowerCase().regex(/^[a-z0-9_]{3,24}$/), password: z.string().min(8).max(128)});
@@ -23,7 +26,7 @@ const AVATAR_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
 const STATUSES = ['online', 'invisible', 'dnd'];
 
 
-export function createApplication({databasePath = './data/commonroom.sqlite', origins = ['http://localhost:5173'], secureCookie = false, trustProxy = false} = {}) {
+export function createApplication({databasePath = './data/commonroom.sqlite', origins = ['http://localhost:5173'], secureCookie = false, trustProxy = false, generate = null, reminderIntervalMs, giphyKey = '', gifFetch} = {}) {
   const db = openDatabase(databasePath);
   const uploads = databasePath === ':memory:' ? join(tmpdir(), `commonroom-uploads-${process.pid}`) : join(dirname(databasePath), 'uploads');
   mkdirSync(uploads, {recursive: true});
@@ -176,6 +179,11 @@ export function createApplication({databasePath = './data/commonroom.sqlite', or
     io.to(contactsOf(req.user.id).map(room)).emit('conversation:changed');
     res.status(201).json({ok:true});
   });
+  // Password backup: a blob wrapped in the browser; only the owner can read or replace it.
+  const b64=z.string().regex(/^[A-Za-z0-9+/]+={0,2}$/);
+  const backupInput=z.object({version:z.literal(1),salt:b64.length(24),iv:b64.length(16),ciphertext:b64.min(24).max(400),iterations:z.number().int().min(100000).max(5000000)}).strict();
+  app.get('/api/identity/backup', requireUser, (req,res) => {const row=db.prepare('SELECT key_backup FROM users WHERE id=?').get(req.user.id);res.json({backup:row?.key_backup?JSON.parse(row.key_backup):null});});
+  app.put('/api/identity/backup', requireUser, (req,res) => {const backup=backupInput.parse(req.body);db.prepare('UPDATE users SET key_backup=? WHERE id=?').run(JSON.stringify(backup),req.user.id);res.json({ok:true});});
   app.get('/api/users', requireUser, (req,res) => {
     const query=typeof req.query.q==='string'?req.query.q.slice(0,40):'';
     const offset=z.coerce.number().int().min(0).max(1000000).parse(req.query.offset ?? 0);
@@ -227,6 +235,44 @@ export function createApplication({databasePath = './data/commonroom.sqlite', or
       db.exec('COMMIT');
     } catch(e) {db.exec('ROLLBACK');throw e;}
     io.to(users.map(room)).emit('conversation:changed');users.forEach(sendPresence);res.status(201).json({id});
+  });
+  // Group membership: the creator adds or removes people; anyone can leave.
+  // Each message is encrypted for the members at send time, so new members can't read
+  // earlier messages and removed members can't read later ones.
+  const groupFor=(id,userId)=>{const c=conversationFor(db,id,userId);return c&&c.kind==='group'?c:null;};
+  const membershipChanged=(id,affected)=>{const ids=[...new Set([...membersFor(db,id).map(m=>m.id),...affected])];io.to(ids.map(room)).emit('conversation:changed');ids.forEach(sendPresence);};
+  app.post('/api/groups/:id/members', requireUser, (req,res) => {
+    const group=groupFor(req.params.id,req.user.id);
+    if(!group) return res.status(404).json({error:'Group not found.'});
+    if(group.created_by!==req.user.id) return res.status(403).json({error:'Only the group creator can add people.'});
+    const {memberIds}=z.object({memberIds:z.array(z.string().uuid()).min(1).max(MAX_GROUP_MEMBERS-1).refine(a=>new Set(a).size===a.length)}).strict().parse(req.body);
+    const current=new Set(membersFor(db,group.id).map(m=>m.id));
+    const added=memberIds.filter(id=>!current.has(id));
+    if(!added.length) return res.status(400).json({error:'Those people are already in the group.'});
+    if(current.size+added.length>MAX_GROUP_MEMBERS) return res.status(400).json({error:`Groups can have up to ${MAX_GROUP_MEMBERS} people.`});
+    if(!added.every(id=>db.prepare('SELECT user_id FROM identities WHERE user_id=?').get(id))) return res.status(409).json({error:'Every selected person needs to open their chats once first.'});
+    const latest=db.prepare('SELECT COALESCE(MAX(id),0) AS id FROM messages WHERE conversation_id=?').get(group.id).id;
+    db.exec('BEGIN IMMEDIATE');
+    try {for(const id of added) db.prepare('INSERT INTO conversation_members(conversation_id,user_id,last_read_id) VALUES(?,?,?)').run(group.id,id,latest);db.exec('COMMIT');}
+    catch(e){db.exec('ROLLBACK');throw e;}
+    membershipChanged(group.id,added);
+    res.status(201).json({added:added.length});
+  });
+  app.delete('/api/groups/:id/members/:userId', requireUser, (req,res) => {
+    const group=groupFor(req.params.id,req.user.id);
+    if(!group) return res.status(404).json({error:'Group not found.'});
+    const leaving=req.params.userId===req.user.id;
+    if(!leaving && group.created_by!==req.user.id) return res.status(403).json({error:'Only the group creator can remove people.'});
+    if(!db.prepare('SELECT user_id FROM conversation_members WHERE conversation_id=? AND user_id=?').get(group.id,req.params.userId)) return res.status(404).json({error:'That person is not in this group.'});
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.prepare('DELETE FROM conversation_members WHERE conversation_id=? AND user_id=?').run(group.id,req.params.userId);
+      // If the creator leaves, the longest-standing remaining member takes over.
+      if(leaving && group.created_by===req.user.id){const next=db.prepare('SELECT user_id FROM conversation_members WHERE conversation_id=? ORDER BY rowid LIMIT 1').get(group.id);if(next) db.prepare('UPDATE conversations SET created_by=? WHERE id=?').run(next.user_id,group.id);}
+      db.exec('COMMIT');
+    } catch(e){db.exec('ROLLBACK');throw e;}
+    membershipChanged(group.id,[req.params.userId]);
+    res.json({ok:true});
   });
   app.post('/api/conversations/:id/read',requireUser,(req,res)=>{
     if(!conversationFor(db,req.params.id,req.user.id)) return res.status(404).json({error:'Conversation not found.'});
@@ -334,6 +380,9 @@ export function createApplication({databasePath = './data/commonroom.sqlite', or
     });
   });
 
+  registerModeration({app, io, db, requireUser, room});
+  registerGifs({app, requireUser, apiKey: giphyKey, ...(gifFetch ? {fetchImpl: gifFetch} : {})});
+  const assistant = registerAssistant({app, io, db, requireUser, room, generate, reminderIntervalMs});
   app.use('/api', (_req, res) => res.status(404).json({error: 'Endpoint not found.'}));
   const dist = fileURLToPath(new URL('../../frontend/dist/', import.meta.url));
   if (existsSync(dist)) app.use(express.static(dist));
@@ -344,7 +393,8 @@ export function createApplication({databasePath = './data/commonroom.sqlite', or
     console.error(error);
     res.status(500).json({error: 'Something went wrong. Please try again.'});
   });
-  return {app, http, io, db, close: async () => {
+  return {app, http, io, db, assistant, close: async () => {
+    assistant.stop();
     await new Promise((resolve) => io.close(resolve));
     db.close();
   }};

@@ -48,7 +48,9 @@ export function editMessage(db,userId,input){
 export function deleteMessage(db,userId,messageId){
   const existing=db.prepare('SELECT * FROM messages WHERE id=?').get(messageId);
   if(!existing || !conversationFor(db,existing.conversation_id,userId)) throw new Error('Message not found.');
-  if(existing.sender_id!==userId) throw new Error('You can only delete your own messages.');
+  // Group creators moderate their group and can remove anyone's message.
+  const conversation=db.prepare('SELECT kind,created_by FROM conversations WHERE id=?').get(existing.conversation_id);
+  if(existing.sender_id!==userId && !(conversation.kind==='group' && conversation.created_by===userId)) throw new Error('You can only delete your own messages.');
   db.exec('BEGIN IMMEDIATE');
   try {
     db.prepare("UPDATE messages SET encrypted_payload=NULL,body='[Deleted]',deleted_at=?,attachment_id=NULL WHERE id=?").run(new Date().toISOString(),messageId);
@@ -62,6 +64,11 @@ export function saveMessage(db,userId,input) {
   const {conversationId,clientId,encrypted,attachmentId}=messageInput.parse(input);
   const conversation=conversationFor(db,conversationId,userId);
   if(!conversation) throw new Error('Conversation not found.');
+  if(conversation.kind==='direct'){
+    const other=conversation.user_a===userId?conversation.user_b:conversation.user_a;
+    const block=db.prepare('SELECT blocker_id FROM blocks WHERE (blocker_id=? AND blocked_id=?) OR (blocker_id=? AND blocked_id=?)').get(userId,other,other,userId);
+    if(block) throw new Error(block.blocker_id===userId?'You blocked this person. Unblock them to send messages.':'You can’t message this person.');
+  }
   const members=verifyEnvelope(db,userId,conversationId,clientId,encrypted);
   const serialized=JSON.stringify(encrypted);
   const existing=db.prepare('SELECT * FROM messages WHERE sender_id=? AND client_id=?').get(userId,clientId);

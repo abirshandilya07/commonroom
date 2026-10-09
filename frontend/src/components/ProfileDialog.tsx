@@ -1,12 +1,12 @@
 import {useEffect,useRef,useState} from 'react';
-import {X,CalendarDays,NotebookPen,MessageSquare} from 'lucide-react';
+import {X,CalendarDays,NotebookPen,MessageSquare,Ban} from 'lucide-react';
 import {api,put} from '../lib/api';
 import type {Presence,Profile} from '../lib/types';
 import Avatar from './Avatar';
 const statusText:Record<string,string>={online:'Online',dnd:'Do not disturb',offline:'Offline',invisible:'Offline'};
 export const joinedDate=(iso:string)=>new Date(iso).toLocaleDateString(undefined,{year:'numeric',month:'long',day:'numeric'});
 // Another member's profile: name, username, join date, presence and a note only you can see.
-export default function ProfileDialog({userId,presence,onClose,onMessage}:{userId:string;presence?:Presence;onClose:()=>void;onMessage?:()=>void}) {
+export default function ProfileDialog({userId,presence,onClose,onMessage,blocked=false,onToggleBlock}:{userId:string;presence?:Presence;onClose:()=>void;onMessage?:()=>void;blocked?:boolean;onToggleBlock?:()=>Promise<void>}) {
   const dialog=useRef<HTMLDialogElement>(null);
   const [profile,setProfile]=useState<Profile|null>(null),[note,setNote]=useState(''),[saved,setSaved]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false);
   useEffect(()=>{const el=dialog.current;el?.showModal();return()=>el?.close();},[]);
@@ -23,6 +23,7 @@ export default function ProfileDialog({userId,presence,onClose,onMessage}:{userI
       <p className="mt-1 text-[11px] text-muted">Only you can see this note.</p>
       <textarea aria-label="Private note" maxLength={1000} rows={3} value={note} onChange={e=>setNote(e.target.value)} placeholder={`Something to remember about ${profile.name}`} className="field resize-none text-[13px]"/>
       {error&&<p role="alert" className="error-notice mt-2">{error}</p>}
+      {onToggleBlock&&<button className={`mt-4 flex items-center gap-1.5 text-xs font-semibold ${blocked?'text-accent':'text-red-500'}`} onClick={()=>{if(blocked||confirm(`Block ${profile.name}? They won’t be able to message you directly, and their group messages will be hidden for you.`))void onToggleBlock().catch(e=>setError(e instanceof Error?e.message:'Could not update.'));}}><Ban size={13}/>{blocked?`Unblock ${profile.name}`:`Block ${profile.name}`}</button>}
       <div className="mt-3 flex items-center justify-end gap-3"><span className="text-[11px] text-muted">{note===saved?(saved?'Saved':''):'Unsaved changes'}</span><button disabled={busy||note===saved} className="primary-button" onClick={()=>void save()}>{busy?'Saving…':'Save note'}</button></div>
     </>}
   </dialog>;

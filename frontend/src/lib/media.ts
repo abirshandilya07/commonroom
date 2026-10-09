@@ -1,5 +1,6 @@
 import {b64,unb64} from '../../../shared/crypto';
 import type {Attachment} from './types';
+import {checkIncoming} from './fileSafety';
 export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 export const MAX_TEXT = 2000;
 
@@ -14,11 +15,11 @@ export function decodeBody(body:string):{text:string;attachment?:Attachment} {
   }
   return {text:body};
 }
-export function kindOf(mime:string):Attachment['kind']|null {
+export function kindOf(mime:string):Attachment['kind'] {
   if(mime.startsWith('image/'))return 'image';
   if(mime.startsWith('video/'))return 'video';
   if(mime.startsWith('audio/'))return 'audio';
-  return null;
+  return 'file';
 }
 export async function encryptFile(data:Blob) {
   const raw=crypto.getRandomValues(new Uint8Array(32)),iv=crypto.getRandomValues(new Uint8Array(12));
@@ -36,7 +37,10 @@ export function attachmentUrl(attachment:Attachment) {
       if(!response.ok)throw new Error(response.status===404?'This file is no longer available.':'Could not load this file.');
       const key=await crypto.subtle.importKey('raw',unb64(attachment.key) as Uint8Array<ArrayBuffer>,'AES-GCM',false,['decrypt']);
       const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv:unb64(attachment.iv) as Uint8Array<ArrayBuffer>},key,await response.arrayBuffer());
-      return URL.createObjectURL(new Blob([plain],{type:attachment.mime}));
+      const problem=checkIncoming(plain,attachment.mime,attachment.name);
+      if(problem)throw new Error(`${problem} It was not opened.`);
+      // Documents are always downloaded, never rendered in the page.
+      return URL.createObjectURL(new Blob([plain],{type:attachment.kind==='file'?'application/octet-stream':attachment.mime}));
     })();
     urls.set(attachment.id,url);url.catch(()=>urls.delete(attachment.id));
   }

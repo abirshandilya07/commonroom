@@ -5,6 +5,7 @@
   const theme = saved === 'light' || saved === 'dark' ? saved
     : window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   document.documentElement.dataset.theme = theme;
+  try { const palette = localStorage.getItem('commonroom-palette'); if (palette) document.documentElement.dataset.palette = palette; } catch { /* default palette */ }
   document.documentElement.style.colorScheme = theme;
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#16121c' : '#36143e');
 })();

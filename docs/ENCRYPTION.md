@@ -50,6 +50,16 @@ The backend stores only public identity keys and encrypted private-key vaults. P
 - There are no encrypted attachments, push message content, client key backup to third parties, or secure deletion guarantees. Browsers may retain memory, downloads, and restored session state.
 - Existing pre-v3 messages remain plaintext and visibly labelled. Migration backups preserve that plaintext too. Enabling encryption cannot retroactively erase it.
 
+## Password unlock on a new browser
+
+After each sign-in, the browser wraps this account's recovery secret with a key derived from the account password (PBKDF2-SHA256, 600,000 iterations, random salt, AES-256-GCM bound to the account ID) and stores only that wrapped copy on the server. Signing in on a new browser unwraps it with the password just typed, so chats open with no recovery key. If the prompt appears later (for example after a reload), the account password or the recovery key both work. The recovery key remains the backup if the password is forgotten.
+
+Trade-off: the server receives the password at every sign-in, so a malicious or compromised server could capture it and unwrap the key backup, then read past encrypted messages. A database-only leak still needs the password (slowed by PBKDF2). Weak passwords weaken this protection. This is a convenience choice for the hackathon build, not equivalent to a device-only key.
+
+## Common Room AI
+
+The AI cannot read encrypted chats on its own. A mention sends only that message's text to the backend, which forwards it to the AI service (Groq by default). Earlier messages are included only when the asker requests it (for example "summarize the chat"); the browser decrypts up to the last 30 messages and sends them with the question. AI answers, private AI chats, reminders and tasks are stored as plaintext on the server and are visible to the server operator and to the AI service. AI answers in a chat are visible to its current members, including people who joined later.
+
 ## Group capacity
 
 `shared/limits.js` sets 256 total members and a 256 KiB incoming packet limit shared by HTTP and Socket.IO. API validation and the composer use the same membership cap. Every encrypted message still wraps its key once per recipient; CPU, payload size, storage, and fan-out grow with group size. This is a capacity boundary, not a benchmark for 256 concurrent users. Larger deployments need load testing and a reviewed group protocol.

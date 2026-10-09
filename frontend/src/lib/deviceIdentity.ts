@@ -1,5 +1,6 @@
-import {api, ApiError, post} from './api';
+import {api, ApiError, post, put} from './api';
 import {createIdentity, unlockIdentity, sessionRecovery, type IdentityRecord, type UnlockedIdentity} from './encryption';
+import {recentPassword, forgetPassword, wrapSecret, unwrapSecret, type KeyBackup} from './passwordBackup';
 
 type DeviceKey = {recoveryKey: string; pendingRecord?: IdentityRecord};
 // Device-local only: the recovery secret is never sent to the API.
@@ -27,6 +28,23 @@ export async function recoverDevice(userId: string, record: IdentityRecord, reco
   sessionRecovery(userId, null);
   return identity;
 }
+const getBackup = async () => (await api<{backup: KeyBackup | null}>('/identity/backup')).backup;
+// After a sign-in, refresh the password-wrapped copy so a new browser can open chats with the password.
+async function saveBackup(userId: string, secret: string) {
+  const password = recentPassword();
+  if (!password) return;
+  try {await put('/identity/backup', await wrapSecret(userId, password, secret)); forgetPassword();} catch {/* the recovery key still works */}
+}
+// A new browser: unlock with the account password instead of a recovery key.
+export async function recoverWithPassword(userId: string, record: IdentityRecord, password: string) {
+  const backup = await getBackup();
+  if (!backup) throw new Error('This account has no password backup yet. Sign in once on a browser where your chats open, or use your recovery key.');
+  let secret: string;
+  try {secret = await unwrapSecret(userId, password, backup);} catch {throw new Error('That password didn’t unlock your chats.');}
+  const identity = await recoverDevice(userId, record, secret);
+  forgetPassword();
+  return identity;
+}
 export type OpenIdentity = {identity: UnlockedIdentity; record?: never} | {identity?: never; record: IdentityRecord};
 async function initialize(userId: string): Promise<OpenIdentity> {
   if (!crypto.subtle) throw new Error('Encrypted messaging needs HTTPS or localhost.');
@@ -52,8 +70,12 @@ async function initialize(userId: string): Promise<OpenIdentity> {
     try {identity = await unlockIdentity(userId, record, secret);} catch {continue;}
     await saveDeviceKey(userId, {recoveryKey: secret});
     sessionRecovery(userId, null);
+    await saveBackup(userId, secret);
     return {identity};
   }
+  // Signed in just now on a new browser: the password restores the key automatically.
+  const password = recentPassword();
+  if (password) {try {return {identity: await recoverWithPassword(userId, record, password)};} catch {/* fall back to the prompt */}}
   // Existing identities are never replaced when this device lacks its key.
   return {record};
 }

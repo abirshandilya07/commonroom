@@ -260,3 +260,34 @@ test('profiles, status, private notes, reactions, edits, deletes and encrypted a
  assert.equal(app.db.prepare('SELECT encrypted_payload FROM messages WHERE id=?').get(withFile.id).encrypted_payload,null);
  assert.equal((await fetch(`${base}/api/attachments/${attachmentId}`,{headers:{Cookie:bob.cookie}})).status,404);
 });
+
+test('group creators add and remove members; new members cannot read earlier messages',async t=>{
+ const dir=mkdtempSync(join(tmpdir(),'commonroom-members-')),app=createApplication({databasePath:join(dir,'test.sqlite'),origins:[origin]}),base=await listen(app);
+ const sockets=[];
+ t.after(async()=>{sockets.forEach(s=>s.disconnect());await app.close();rmSync(dir,{recursive:true,force:true});});
+ async function account(username){const result=await request(base,'/auth/register',{body:{username,name:username,password:'test-password-123'}});const keys=await createIdentity(result.data.user.id);await request(base,'/identity',{cookie:result.cookie,body:keys.record});return {...result,keys,user:result.data.user};}
+ async function connect(cookie){const s=client(base,{transports:['websocket'],extraHeaders:{Origin:origin,Cookie:cookie},autoConnect:false,reconnection:false});sockets.push(s);const ready=event(s,'connect');s.connect();await ready;return s;}
+ const [alice,bob,carol,dave]=await Promise.all(['alice','bob','carol','dave'].map(account));
+ const a=await connect(alice.cookie),d=await connect(dave.cookie);
+ const group=(await request(base,'/groups',{cookie:alice.cookie,body:{title:'Study group',memberIds:[bob.user.id,carol.user.id]}})).data.id;
+ const send=async(owner,socket,body)=>{const clientId=randomUUID();return socket.timeout(4000).emitWithAck('message:send',{conversationId:group,clientId,encrypted:await encryptMessage(owner.keys.unlocked,group,clientId,body,membersFor(app.db,group))});};
+ const before=(await send(alice,a,'Before Dave joined')).message;
+ assert.equal((await request(base,`/groups/${group}/members`,{cookie:bob.cookie,body:{memberIds:[dave.user.id]}})).status,403);
+ const changed=event(d,'conversation:changed');
+ assert.equal((await request(base,`/groups/${group}/members`,{cookie:alice.cookie,body:{memberIds:[dave.user.id]}})).status,201);await changed;
+ const history=(await request(base,`/conversations/${group}/messages`,{cookie:dave.cookie})).data.messages;
+ await assert.rejects(decryptMessage(dave.keys.unlocked,history.find(m=>m.id===before.id),alice.keys.record));
+ assert.equal((await request(base,'/conversations',{cookie:dave.cookie})).data.conversations[0].unreadCount,0);
+ const after=(await send(alice,a,'Welcome Dave')).message;
+ assert.equal(await decryptMessage(dave.keys.unlocked,after,alice.keys.record),'Welcome Dave');
+ const staleId=randomUUID(),stale=await encryptMessage(alice.keys.unlocked,group,staleId,'prepared earlier',membersFor(app.db,group));
+ // Removal: only the creator removes others; anyone can leave.
+ assert.equal((await request(base,`/groups/${group}/members/${carol.user.id}`,{cookie:bob.cookie,method:'DELETE'})).status,403);
+ assert.equal((await request(base,`/groups/${group}/members/${carol.user.id}`,{cookie:alice.cookie,method:'DELETE'})).status,200);
+ assert.equal((await request(base,`/conversations/${group}/messages`,{cookie:carol.cookie})).status,404);
+ assert.equal((await request(base,`/groups/${group}/members/${bob.user.id}`,{cookie:bob.cookie,method:'DELETE'})).status,200);
+ // Creator leaving hands the group to the next member.
+ assert.equal((await request(base,`/groups/${group}/members/${alice.user.id}`,{cookie:alice.cookie,method:'DELETE'})).status,200);
+ assert.equal((await request(base,'/conversations',{cookie:dave.cookie})).data.conversations[0].createdBy,dave.user.id);
+ assert.equal((await a.timeout(4000).emitWithAck('message:send',{conversationId:group,clientId:staleId,encrypted:stale})).ok,false);
+});
