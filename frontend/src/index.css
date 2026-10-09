@@ -1,0 +1,77 @@
+@import "tailwindcss";
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+@theme inline {
+  --font-sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Arial, sans-serif;
+  --color-canvas: var(--canvas);
+  --color-panel: var(--panel);
+  --color-soft: var(--soft);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-success: var(--success);
+}
+:root {
+  --canvas: #ffffff; --panel: #ffffff; --soft: #f7f7f9; --line: #e5e3e9;
+  --ink: #242129; --muted: #726d7b; --accent: #7041a0; --accent-soft: #f0e8f8;
+  --success: #14835a; --sidebar: #f5f0f7; --sidebar-hover: #eae1ee;
+  --sidebar-active: #e2d3ee; --topbar: #36143e; --rail: #431b4a;
+  --danger-bg: #fff0f1; --danger-text: #a2263d;
+  --warning-bg: #fff7df; --warning-text: #825a0b;
+  font-family: var(--font-sans); color: var(--ink); background: var(--canvas);
+  font-synthesis: none; text-rendering: optimizeLegibility;
+}
+:root[data-theme="dark"] {
+  --canvas: #1a1d21; --panel: #202328; --soft: #25282e; --line: #36383f;
+  --ink: #edecef; --muted: #aaa6b3; --accent: #c4a0ef; --accent-soft: #392d47;
+  --success: #62cca0; --sidebar: #201b27; --sidebar-hover: #302838;
+  --sidebar-active: #413050; --topbar: #16121c; --rail: #19121e;
+  --danger-bg: #43212b; --danger-text: #ffaeb9;
+  --warning-bg: #3b321f; --warning-text: #efd18c;
+}
+* { box-sizing: border-box; }
+body { margin: 0; }
+button, a, input, textarea { -webkit-tap-highlight-color: transparent; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: .5; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+textarea:focus-visible { outline: none; }
+::selection { background: var(--accent-soft); color: var(--ink); }
+input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
+* { scrollbar-width: thin; scrollbar-color: #8b839055 transparent; }
+@layer components {
+  .brand-mark { @apply grid h-9 w-9 shrink-0 place-items-center rounded-xl text-white; background: #8354b5; }
+  .field-label { @apply block text-[13px] font-semibold text-ink; }
+  .field { @apply mt-2 block w-full rounded-lg border border-line bg-canvas px-3.5 py-3 text-sm font-normal text-ink; }
+  .primary-button { @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold text-white transition disabled:opacity-50; background: #7041a0; }
+  .primary-button:hover:not(:disabled) { background: #8150b2; }
+  .secondary-button { @apply inline-flex items-center justify-center gap-2 rounded-lg border border-line bg-panel px-3 py-2 text-sm font-medium text-ink hover:bg-soft; }
+  .icon-button { @apply grid h-9 w-9 shrink-0 place-items-center rounded-lg text-muted transition hover:bg-soft hover:text-ink; }
+  .rail-button { @apply grid h-10 w-10 place-items-center rounded-xl text-white/65 transition hover:bg-white/10 hover:text-white; }
+  .sidebar-row { @apply flex w-full min-w-0 items-center gap-2.5 rounded-md px-3 py-2 text-left text-[13px] text-ink; }
+  .sidebar-row:hover { background: var(--sidebar-hover); }
+  .sidebar-row[aria-current="true"] { background: var(--sidebar-active); }
+  .error-notice { @apply rounded-lg px-3 py-2.5 text-sm; background: var(--danger-bg); color: var(--danger-text); }
+  .warning-notice { @apply rounded-lg px-3 py-2 text-xs; background: var(--warning-bg); color: var(--warning-text); }
+  .message-row { @apply flex gap-3 px-4 py-2 hover:bg-soft sm:px-7; }
+  .dialog-panel { @apply fixed inset-0 m-auto w-[calc(100%-2rem)] max-w-md rounded-xl border border-line bg-panel p-5 text-ink shadow-2xl backdrop:bg-black/55; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
+}
+
+/* Reveal a complete new palette rather than interpolating glyph colors.
+   No opacity cross-fade: old/new text never overlaps or fades through grey. */
+::view-transition-old(root), ::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+::view-transition-new(root) { animation: theme-reveal 280ms ease-out both; }
+@keyframes theme-reveal {
+  from { clip-path: inset(0 100% 0 0); }
+  to { clip-path: inset(0 0 0 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(root), ::view-transition-old(root), ::view-transition-new(root) { animation: none !important; }
+}

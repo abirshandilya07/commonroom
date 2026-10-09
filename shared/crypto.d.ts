@@ -1,0 +1,13 @@
+export type PublicIdentity = {encryptionKey: JsonWebKey; signingKey: JsonWebKey};
+export type IdentityRecord = PublicIdentity & {vault: {version: number; iv: string; ciphertext: string}};
+export type UnlockedIdentity = {userId: string; encryptionPrivate: CryptoKey; signingPrivate: CryptoKey; publicIdentity: PublicIdentity};
+export type Envelope = {version: number; conversationId: string; senderId: string; clientId: string; iv: string; ciphertext: string; recipients: {userId: string; key: string}[]; signature: string};
+export function b64(bytes: ArrayBuffer | Uint8Array): string;
+export function unb64(text: string): Uint8Array;
+export function canonicalPublic(identity: PublicIdentity): string;
+export function fingerprint(identity: PublicIdentity): Promise<string>;
+export function createIdentity(userId: string): Promise<{record: IdentityRecord; recoveryKey: string; unlocked: UnlockedIdentity}>;
+export function unlockIdentity(userId: string, record: IdentityRecord, recoveryKey: string): Promise<UnlockedIdentity>;
+export function unsignedEnvelope(payload: Envelope): string;
+export function encryptMessage(identity: UnlockedIdentity, conversationId: string, clientId: string, body: string, members: {id: string; identity: PublicIdentity}[]): Promise<Envelope>;
+export function decryptMessage(identity: UnlockedIdentity, message: {encrypted: Envelope; conversationId: string; senderId: string; clientId: string}, senderIdentity: PublicIdentity): Promise<string>;

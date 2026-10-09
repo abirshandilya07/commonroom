@@ -1,0 +1,13 @@
+{
+  "name": "commonroom", "private": true, "version": "0.1.0", "type": "module",
+  "workspaces": ["frontend", "backend"],
+  "engines": {"node": ">=24.0.0 <25"},
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c green,cyan \"npm run dev -w backend\" \"npm run dev -w frontend\"",
+    "build": "npm run build -w frontend",
+    "start": "npm start -w backend",
+    "test": "npm test -w backend",
+    "check": "npm run build && npm test"
+  },
+  "devDependencies": {"concurrently": "^9.2.0"}
+}

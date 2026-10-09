@@ -1,0 +1,49 @@
+import { DatabaseSync } from 'node:sqlite';
+import { mkdirSync, existsSync } from 'node:fs';
+import { dirname } from 'node:path';
+const conversationSchema = (name) => `CREATE TABLE ${name} (
+ id TEXT PRIMARY KEY, user_a TEXT REFERENCES users(id), user_b TEXT REFERENCES users(id), created_at TEXT NOT NULL,
+ kind TEXT NOT NULL DEFAULT 'direct' CHECK(kind IN ('direct','group')), title TEXT, created_by TEXT REFERENCES users(id),
+ CHECK(kind='group' OR (user_a IS NOT NULL AND user_b IS NOT NULL AND user_a < user_b)), UNIQUE(user_a,user_b)
+)`;
+export function openDatabase(filename) {
+  if (filename !== ':memory:') mkdirSync(dirname(filename), {recursive:true});
+  const existed=filename!==':memory:' && existsSync(filename);
+  const db=new DatabaseSync(filename);
+  db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
+    CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,name TEXT NOT NULL,username TEXT NOT NULL UNIQUE,password_hash TEXT NOT NULL,created_at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id),expires_at INTEGER NOT NULL);`);
+  const columns=db.prepare('PRAGMA table_info(conversations)').all();
+  if (!columns.length) db.exec(conversationSchema('conversations'));
+  else if (!columns.some(c=>c.name==='kind')) {
+    // VACUUM INTO creates a consistent backup including WAL content, not a raw file copy.
+    if(existed) db.prepare('VACUUM INTO ?').run(`${filename}.pre-v3-${Date.now()}.sqlite`);
+    db.exec('PRAGMA foreign_keys=OFF; BEGIN IMMEDIATE;');
+    try {
+      db.exec(`${conversationSchema('conversations_v3')};
+        INSERT INTO conversations_v3(id,user_a,user_b,created_at,kind,created_by) SELECT id,user_a,user_b,created_at,'direct',user_a FROM conversations;
+        DROP TABLE conversations; ALTER TABLE conversations_v3 RENAME TO conversations; COMMIT;`);
+    } catch(e) {db.exec('ROLLBACK');throw e;} finally {db.exec('PRAGMA foreign_keys=ON');}
+  }
+  db.exec(`CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY AUTOINCREMENT,conversation_id TEXT NOT NULL REFERENCES conversations(id),sender_id TEXT NOT NULL REFERENCES users(id),client_id TEXT NOT NULL,body TEXT NOT NULL CHECK(length(body) BETWEEN 1 AND 2000),created_at TEXT NOT NULL,encrypted_payload TEXT,UNIQUE(sender_id,client_id));
+    CREATE INDEX IF NOT EXISTS messages_conversation ON messages(conversation_id,id);
+    CREATE TABLE IF NOT EXISTS conversation_members(conversation_id TEXT NOT NULL REFERENCES conversations(id),user_id TEXT NOT NULL REFERENCES users(id),last_read_id INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(conversation_id,user_id));
+    CREATE INDEX IF NOT EXISTS members_user ON conversation_members(user_id,conversation_id);
+    INSERT OR IGNORE INTO conversation_members(conversation_id,user_id) SELECT id,user_a FROM conversations WHERE kind='direct';
+    INSERT OR IGNORE INTO conversation_members(conversation_id,user_id) SELECT id,user_b FROM conversations WHERE kind='direct';
+    CREATE TABLE IF NOT EXISTS identities(user_id TEXT PRIMARY KEY REFERENCES users(id),public_keys TEXT NOT NULL,vault TEXT NOT NULL,created_at TEXT NOT NULL);`);
+  if(!db.prepare('PRAGMA table_info(messages)').all().some(c=>c.name==='encrypted_payload')) db.exec('ALTER TABLE messages ADD COLUMN encrypted_payload TEXT');
+  // v4: profiles, presence status, private notes, reactions, edits/deletes and encrypted attachments.
+  const addColumn=(table,column,type)=>{if(!db.prepare(`PRAGMA table_info(${table})`).all().some(c=>c.name===column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);};
+  addColumn('users','status',"TEXT NOT NULL DEFAULT 'online'");
+  addColumn('messages','edited_at','TEXT');
+  addColumn('messages','deleted_at','TEXT');
+  addColumn('messages','attachment_id','TEXT');
+  db.exec(`CREATE TABLE IF NOT EXISTS avatars(user_id TEXT PRIMARY KEY REFERENCES users(id),mime TEXT NOT NULL,data BLOB NOT NULL,updated_at INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS notes(owner_id TEXT NOT NULL REFERENCES users(id),target_id TEXT NOT NULL REFERENCES users(id),body TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(owner_id,target_id));
+    CREATE TABLE IF NOT EXISTS reactions(message_id INTEGER NOT NULL REFERENCES messages(id),user_id TEXT NOT NULL REFERENCES users(id),emoji TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(message_id,user_id,emoji));
+    CREATE TABLE IF NOT EXISTS attachments(id TEXT PRIMARY KEY,conversation_id TEXT NOT NULL REFERENCES conversations(id),uploader_id TEXT NOT NULL REFERENCES users(id),size INTEGER NOT NULL,created_at TEXT NOT NULL);`);
+  db.exec('PRAGMA user_version=4');
+  if(db.prepare('PRAGMA foreign_key_check').all().length) throw new Error('Database migration integrity check failed.');
+  return db;
+}
