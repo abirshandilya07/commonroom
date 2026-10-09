@@ -59,9 +59,10 @@ The updated ZIP removes this extra nested folder. Open the directory that direct
 - **Images, videos and voice notes.** Attach with the paperclip, or press the mic to record (live level animation, up to 5 minutes). Files are encrypted in the browser with a fresh AES-GCM key before upload; the key travels inside the encrypted message, so the server stores only opaque bytes (`backend/data/uploads/`). Limit 25 MB per file.
 - **Reactions, editing and deleting.** Hover a message for the toolbar. Edits are re-encrypted and re-signed by the sender and marked "(edited)". Deleting removes the ciphertext, reactions and attachment for everyone.
 - **Profiles and settings.** Click a name or avatar to see a person's name, username, join date and status, and to keep a private note about them (only you can see it). The gear icon opens your own settings: change your display name and profile picture.
+- **Friends.** The *Friends* button in the left rail (or at the top of the sidebar) opens the Friends page, where you can search anyone by name or username and send a friend request. Requests show there with Accept and Decline, and you can also add, accept or remove friends from a person's profile. Your friends are listed online first with their status (Online, Do not disturb or Offline) and a button to message them. Blocking someone ends the friendship and stops requests both ways.
 - **Status.** Click your name at the bottom left to choose Online, Do not disturb (mutes your alerts and shows a red dot to others) or Appear offline.
 - **Sidebar previews and "Seen".** Each browser decrypts the latest message locally for the sidebar. Your newest message shows "Seen" (or "Seen by …" in groups) once others have read it.
-- **Reliability.** Unread counts update locally instead of reloading the conversation list for every message; API rate limits are per signed-in session (so a whole campus Wi-Fi isn't throttled together); presence is shared only with people you have a conversation with; typing indicators stop promptly; the chat no longer jumps to the bottom while you read history.
+- **Reliability.** Unread counts update locally instead of reloading the conversation list for every message; API rate limits are per signed-in session (so a whole campus Wi-Fi isn't throttled together); presence is shared only with people you have a conversation with or are friends with; typing indicators stop promptly; the chat no longer jumps to the bottom while you read history.
 
 Reactions, profile pictures, display names and private notes are stored readable on the server. Message text, edits and media are end-to-end encrypted. The database migrates automatically to `user_version=4` on first start.
 
@@ -191,6 +192,12 @@ A built-in assistant powered by Groq (or Google Gemini):
 
 The key is only used by the backend and never reaches the browser. Without a key the app works normally and the AI replies with a message explaining how to turn it on. `GROQ_MODEL` picks a different Groq model (default `openai/gpt-oss-120b`). If you prefer Google Gemini, leave `GROQ_API_KEY` empty and set `GEMINI_API_KEY` (and optionally `GEMINI_MODEL`, default `gemini-flash-latest`).
 
+## GIFs and Memer
+
+The emoji button has a **GIF** tab: search GIPHY (needs a free `GIPHY_API_KEY` from https://developers.giphy.com/dashboard/) or upload a GIF from your computer (no key needed).
+
+**Memer** is a just-for-fun meme bot. Type `@meme` (or `@meme ProgrammerHumor` for a specific subreddit) as a message, or press the laughing-face button, and a random Reddit meme from the free meme-api.com service is sent to everyone in the chat. No key is needed. NSFW and spoiler posts are skipped. The server fetches the meme, and your browser encrypts and sends it like a photo.
+
 ## Configuration
 
 Defaults work without an `.env` file. To override them, copy `backend/.env.example` to `backend/.env` and edit it. In Windows PowerShell:
@@ -215,6 +222,7 @@ cp backend/.env.example backend/.env
 | `GROQ_API_KEY` | Turns on Common Room AI. Get one at https://console.groq.com/keys. Keep it out of Git. |
 | `GROQ_MODEL` | Optional Groq model; default `openai/gpt-oss-120b`. |
 | `GEMINI_API_KEY` / `GEMINI_MODEL` | Optional alternative to Groq, used only when `GROQ_API_KEY` is empty. |
+| `GIPHY_API_KEY` | Turns on GIF search. Free key at https://developers.giphy.com/dashboard/. |
 
 No `.env` is needed in the frontend. Do not put private keys in Vite variables; frontend code is public.
 

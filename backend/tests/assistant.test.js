@@ -78,6 +78,14 @@ test('private AI chat, mentions with and without context, reminders and tasks',a
  const task=(await request(base,'/items',{cookie:alice.cookie,body:{kind:'task',title:'Write report',dueAt:null}})).data.item;
  assert.equal((await request(base,`/items/${task.id}`,{cookie:bob.cookie,method:'PATCH',body:{done:true}})).status,404);
  assert.equal((await request(base,`/items/${task.id}`,{cookie:alice.cookie,method:'PATCH',body:{done:true}})).data.item.done,true);
+ // Editing title and due date (the calendar moves items between days).
+ const moved=(await request(base,`/items/${task.id}`,{cookie:alice.cookie,method:'PATCH',body:{title:'Write final report',dueAt:'2026-11-03T09:00:00.000Z'}})).data.item;
+ assert.equal(moved.title,'Write final report');assert.equal(moved.dueAt,'2026-11-03T09:00:00.000Z');assert.equal(moved.done,true);
+ assert.equal((await request(base,`/items/${task.id}`,{cookie:alice.cookie,method:'PATCH',body:{dueAt:null}})).data.item.dueAt,null);
+ assert.equal((await request(base,`/items/${task.id}`,{cookie:bob.cookie,method:'PATCH',body:{title:'Hijack'}})).status,404);
+ const nag=(await request(base,'/items',{cookie:alice.cookie,body:{kind:'reminder',title:'Nag',dueAt:'2026-11-03T09:00:00.000Z'}})).data.item;
+ assert.equal((await request(base,`/items/${nag.id}`,{cookie:alice.cookie,method:'PATCH',body:{dueAt:null}})).status,400);
+ assert.equal((await request(base,`/items/${nag.id}`,{cookie:alice.cookie,method:'DELETE'})).status,200);
  assert.equal((await request(base,`/items/${task.id}`,{cookie:bob.cookie,method:'DELETE'})).status,404);
  assert.equal((await request(base,`/items/${task.id}`,{cookie:alice.cookie,method:'DELETE'})).status,200);
  // The bot can mark items done by id, but only the asker's own.

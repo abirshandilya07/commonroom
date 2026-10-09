@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { MessageSquare, ArrowRight, Check, Zap, ShieldCheck } from 'lucide-react';
+import { MessageSquare, ArrowRight, Check, Zap, ShieldCheck, Eye, EyeOff } from 'lucide-react';
 import { post } from '../lib/api';
 import type { Me } from '../lib/types';
 import ThemeToggle from './ThemeToggle';
@@ -8,6 +8,7 @@ export default function AuthScreen({onAuth}: {onAuth: (user: Me) => void}) {
   const [register, setRegister] = useState(true);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy(true); setError('');
     const fields = Object.fromEntries(new FormData(event.currentTarget));
@@ -28,7 +29,7 @@ export default function AuthScreen({onAuth}: {onAuth: (user: Me) => void}) {
         <form onSubmit={submit} className="mt-7 space-y-4">
           {register && <label className="field-label">Your name<input className="field" name="name" autoComplete="name" placeholder="e.g. Abir" required minLength={2} maxLength={40}/></label>}
           <label className="field-label">Username<input className="field" name="username" autoComplete="username" autoCapitalize="none" placeholder="e.g. abir_m" required pattern="[a-zA-Z0-9_]{3,24}" title="3–24 letters, numbers, or underscores" minLength={3} maxLength={24}/></label>
-          <label className="field-label">Password<input className="field" type="password" name="password" autoComplete={register ? 'new-password' : 'current-password'} placeholder="At least 8 characters" required minLength={8} maxLength={128}/></label>
+          <div><label htmlFor="auth-password" className="field-label">Password</label><div className="relative"><input id="auth-password" className="field pr-11" type={showPassword ? 'text' : 'password'} name="password" autoComplete={register ? 'new-password' : 'current-password'} placeholder="At least 8 characters" required minLength={8} maxLength={128}/><button type="button" className="absolute right-1.5 top-1/2 mt-1 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-md text-muted hover:bg-soft hover:text-ink" aria-label={showPassword ? 'Hide password' : 'Show password'} aria-pressed={showPassword} aria-controls="auth-password" title={showPassword ? 'Hide password' : 'Show password'} onClick={() => setShowPassword(v => !v)}>{showPassword ? <EyeOff size={17}/> : <Eye size={17}/>}</button></div></div>
           {error && <p role="alert" className="error-notice">{error}</p>}
           <button disabled={busy} className="primary-button w-full py-3">{busy ? 'One moment…' : register ? 'Let’s get you connected' : 'Sign in to Commonroom'}<ArrowRight size={16}/></button>
         </form>

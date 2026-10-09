@@ -66,3 +66,19 @@ test('GIF search proxies GIPHY results and only fetches GIPHY media',async t=>{
  assert.equal((await request(base,`/gifs/file?u=${encodeURIComponent('http://127.0.0.1/x.gif')}`,{cookie})).status,400);
  assert.equal((await request(base,'/gifs/search?q=cat')).status,401);
 });
+test('Memer fetches a safe Reddit meme and only proxies Reddit or Imgur images',async t=>{
+ const dir=mkdtempSync(join(tmpdir(),'commonroom-meme-'));
+ const fetched=[];
+ const memeFetch=async(url)=>{fetched.push(String(url));if(String(url).startsWith('https://meme-api.com/'))return new Response(JSON.stringify({count:3,memes:[{title:'nsfw',subreddit:'memes',url:'https://i.redd.it/a.jpg',nsfw:true,spoiler:false},{title:'spoiler',subreddit:'memes',url:'https://i.redd.it/b.jpg',nsfw:false,spoiler:true},{title:'Safe one',subreddit:'ProgrammerHumor',postLink:'https://redd.it/x',url:'https://i.redd.it/c.png',nsfw:false,spoiler:false}]}),{status:200});return new Response(Buffer.from('PNG....'),{status:200,headers:{'content-type':'image/png'}});};
+ const app=createApplication({databasePath:join(dir,'t.sqlite'),origins:[origin],memeFetch});
+ await new Promise(r=>app.http.listen(0,'127.0.0.1',r));const base=`http://127.0.0.1:${app.http.address().port}`;
+ t.after(async()=>{await app.close();rmSync(dir,{recursive:true,force:true});});
+ const {cookie}=await request(base,'/auth/register',{body:{username:'mia',name:'Mia',password:'test-password-123'}});
+ const {data}=await request(base,'/memes/random?sub=ProgrammerHumor',{cookie});
+ assert.equal(data.title,'Safe one');assert.equal(data.subreddit,'ProgrammerHumor');assert.match(data.image,/^\/api\/memes\/file\?u=/);
+ assert.equal(fetched[0],'https://meme-api.com/gimme/ProgrammerHumor/10');
+ const file=await fetch(`${base}${data.image}`,{headers:{Cookie:cookie}});assert.equal(file.status,200);assert.equal(file.headers.get('content-type'),'image/png');
+ assert.equal((await request(base,'/memes/random?sub=../../etc',{cookie})).status,400);
+ assert.equal((await request(base,`/memes/file?u=${encodeURIComponent('https://evil.example/x.png')}`,{cookie})).status,400);
+ assert.equal((await request(base,'/memes/random')).status,401);
+});

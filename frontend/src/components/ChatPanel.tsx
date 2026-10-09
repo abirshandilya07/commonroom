@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { ArrowLeft, Send, Check, MessageSquare, Info, X, Search, LockKeyhole, ArrowDown, Paperclip, Mic, Pencil, Trash2, SmilePlus, ImageIcon, Film, FileText, UserPlus, UserMinus, LogOut, Crown, Sparkles, Smile, Flag, Ban, ShieldAlert, Eye } from 'lucide-react';
+import { ArrowLeft, Send, Check, MessageSquare, Info, X, Search, LockKeyhole, ArrowDown, Paperclip, Mic, Pencil, Trash2, SmilePlus, ImageIcon, Film, FileText, UserPlus, UserMinus, LogOut, Crown, Sparkles, Smile, Flag, Ban, ShieldAlert, Eye, Laugh } from 'lucide-react';
 import { api, post } from '../lib/api';
 import { AiReply, Thinking } from './AiBits';
 import { MENTION, READ_REQUEST, CONTEXT_SIZE } from '../hooks/useAssistant';
+// "@meme" or "@meme ProgrammerHumor" on its own asks Memer for a random Reddit meme.
+const MEME_COMMAND = /^\s*@(?:meme|memer)(?:\s+(?:r\/)?([A-Za-z0-9_]{2,21}))?\s*$/i;
 import Avatar from './Avatar';
 import AttachmentView from './Attachment';
 import VoiceRecorder from './VoiceRecorder';
@@ -171,10 +173,28 @@ export default function ChatPanel(p: Props) {
     catch (e) { setError(e instanceof Error ? e.message : 'Unable to send.'); return false; }
     finally { setBusy(false); }
   }
+  // Memer: the server picks a safe meme; it is sent like a photo, encrypted on this device first.
+  const [memeBusy, setMemeBusy] = useState(false);
+  const memeCommand = file ? null : draft.match(MEME_COMMAND);
+  async function sendMeme(subreddit?: string) {
+    if (memeBusy || busy) return;
+    setMemeBusy(true); setError('');
+    try {
+      const meme = await api<{title: string; subreddit: string; image: string}>(`/memes/random${subreddit ? `?sub=${encodeURIComponent(subreddit)}` : ''}`);
+      const response = await fetch(meme.image, {credentials: 'same-origin'});
+      if (!response.ok) throw new Error('That meme couldn’t be loaded. Try again.');
+      const blob = await response.blob(), ext = (blob.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
+      const name = `${meme.title.replace(/[^\w -]/g, '').trim().slice(0, 40) || 'meme'}.${ext}`;
+      const ok = await deliver(`😂 Memer · r/${meme.subreddit}\n${meme.title}`, {file: new File([blob], name, {type: blob.type || 'image/jpeg'}), name});
+      if (ok && memeCommand) {setDraft(''); p.onTyping(p.conversation.id, false);}
+    } catch (e) {setError(e instanceof Error ? `Memer: ${e.message}` : 'Memer couldn’t find a meme.');}
+    finally {setMemeBusy(false);}
+  }
   async function submit(event: FormEvent) {
     event.preventDefault();
     const body = draft.trim();
-    if ((!body && !file) || busy) return;
+    if ((!body && !file) || busy || memeBusy) return;
+    if (memeCommand) {await sendMeme(memeCommand[1]); return;}
     const ok = await deliver(body, file ? {file, name: file.name} : undefined, {body, file});
     // Keep a file picked while this message was still sending.
     if (ok) {setDraft(''); setEmojiOpen(false); setFile(current => current === file ? null : current); retry.current = null; p.onTyping(p.conversation.id, false);}
@@ -293,24 +313,26 @@ export default function ChatPanel(p: Props) {
                     {!!gifs.length && <p className="mt-1 text-right text-[9px] text-muted">Powered by GIPHY</p>}
                   </div> : <div className="max-h-60 overflow-y-auto">{EMOJI_GROUPS.map(([label, list]) => <div key={label}><p className="px-1 pb-0.5 pt-1.5 text-[10px] text-muted">{label}</p><div className="grid grid-cols-8 gap-0.5">{list.map(emoji => <button type="button" key={emoji} aria-label={`Insert ${emoji}`} onClick={() => insertEmoji(emoji)} className="grid h-8 w-8 place-items-center rounded-md text-lg hover:bg-soft">{emoji}</button>)}</div></div>)}</div>}
                 </div>}
+      {memeCommand && !recording && <div className="mb-2 flex items-center gap-1.5 rounded-lg border border-accent/40 bg-accent-soft px-3 py-2 text-[11px] font-semibold text-accent"><Laugh size={13}/>{memeBusy ? 'Memer is finding a meme…' : `Memer will send a random meme${memeCommand[1] ? ` from r/${memeCommand[1]}` : ''} to everyone here`}</div>}
       {mentioned && !recording && <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-accent/40 bg-accent-soft px-3 py-2 text-[11px]"><span className="flex items-center gap-1.5 font-semibold text-accent"><Sparkles size={13}/>Common Room AI will answer in this chat</span><label className="flex items-center gap-1.5 text-ink"><input type="checkbox" checked={readChat} onChange={e => setReadOverride(e.target.checked)}/>Let it read the last {CONTEXT_SIZE} messages</label><span className="text-muted">{readChat ? 'Those messages are sent to the AI service to answer.' : 'It only sees this message.'}</span></div>}
       <div className="overflow-hidden rounded-xl border border-line bg-panel focus-within:border-accent focus-within:ring-1 focus-within:ring-accent">
         {recording ? <VoiceRecorder onCancel={() => setRecording(false)} onError={setError} onSend={(blob, duration) => {setRecording(false); void deliver('', {file: blob, name: 'Voice note', duration});}}/> : <>
           {file && <div className="mx-3 mt-3 flex items-center gap-2 rounded-lg border border-line bg-soft px-3 py-2 text-xs">{kindOf(file.type) === 'video' ? <Film size={15} className="text-accent"/> : kindOf(file.type) === 'audio' ? <Mic size={15} className="text-accent"/> : kindOf(file.type) === 'image' ? <ImageIcon size={15} className="text-accent"/> : <FileText size={15} className="text-accent"/>}{preview && (kindOf(file.type) === 'video' ? <video src={preview} muted className="h-12 w-16 shrink-0 rounded-md bg-black object-cover"/> : <img src={preview} alt="" className="h-12 w-12 shrink-0 rounded-md object-cover"/>)}<span className="min-w-0 flex-1 truncate font-semibold">{file.name}</span><span className="text-muted">{formatBytes(file.size)}</span><button type="button" aria-label="Remove attachment" disabled={busy} onClick={() => setFile(null)}><X size={14}/></button></div>}
-          <textarea ref={textBox} aria-label="Message" placeholder={file ? 'Add a caption (optional)' : `Message ${p.conversation.peer.name}`} rows={2} maxLength={MAX_TEXT} disabled={busy} value={draft} onChange={(e) => {setDraft(e.target.value); p.onTyping(p.conversation.id, !!e.target.value.trim());}} onKeyDown={(e) => {if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {e.preventDefault(); void submit(e);}}} className="block max-h-36 min-h-[70px] w-full resize-none bg-transparent px-4 pb-2 pt-3 text-[13px] leading-6"/>
+          <textarea ref={textBox} aria-label="Message" placeholder={file ? 'Add a caption (optional)' : `Message ${p.conversation.peer.name} · to message AI use @ai`} rows={2} maxLength={MAX_TEXT} disabled={busy} value={draft} onChange={(e) => {setDraft(e.target.value); p.onTyping(p.conversation.id, !!e.target.value.trim());}} onKeyDown={(e) => {if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {e.preventDefault(); void submit(e);}}} className="block max-h-36 min-h-[70px] w-full resize-none bg-transparent px-4 pb-2 pt-3 text-[13px] leading-6"/>
           <div className="flex items-center justify-between gap-2 px-2 pb-2">
             <div className="flex items-center gap-0.5">
               <button type="button" aria-label="Attach a file" title="Attach a photo, video, audio or document (up to 25 MB)" disabled={busy || !ready || !p.connected} className="icon-button h-8 w-8" onClick={() => filePicker.current?.click()}><Paperclip size={17}/></button>
               <button type="button" aria-label="Insert emoji" title="Emoji" aria-expanded={emojiOpen} disabled={busy} className="icon-button h-8 w-8" onClick={() => setEmojiOpen(!emojiOpen)}><Smile size={17}/></button>
               <button type="button" aria-label="Record voice note" title="Record voice note" disabled={busy || !ready || !p.connected} className="icon-button h-8 w-8" onClick={() => {setError(''); setRecording(true);}}><Mic size={17}/></button>
+              <button type="button" aria-label="Send a random meme" title="Memer: send a random meme (or type @meme subreddit)" disabled={busy || memeBusy || !ready || peerBlocked || !p.connected} className="icon-button h-8 w-8" onClick={() => void sendMeme()}><Laugh size={17} className={memeBusy ? 'animate-pulse' : ''}/></button>
               <input ref={filePicker} type="file" hidden onChange={e => {void choose(e.target.files?.[0]); e.target.value = '';}}/>
-              <span className="ml-1 hidden text-[10px] text-muted sm:inline">{busy && file ? 'Encrypting and uploading…' : draft.length > 0 ? `${draft.length.toLocaleString()} / 2,000` : ''}</span>
+              <span className="ml-1 hidden text-[10px] text-muted sm:inline">{memeBusy ? 'Finding a meme…' : busy && file ? 'Encrypting and uploading…' : draft.length > 0 ? `${draft.length.toLocaleString()} / 2,000` : ''}</span>
             </div>
             <button type="submit" disabled={busy || !ready || peerBlocked || !p.connected || (!draft.trim() && !file)} aria-label={busy ? 'Sending message' : error ? 'Retry message' : 'Send message'} className="primary-button rounded-md px-3 py-2"><Send size={15}/><span className="hidden text-xs sm:inline">Send</span></button>
           </div>
         </>}
       </div>
-      <p className="mt-1.5 text-right text-[10px] text-muted"><span className="font-semibold">Enter</span> to send · <span className="font-semibold">Shift + Enter</span> for a new line · <span className="font-semibold text-accent">@ai</span> to ask Common Room AI</p>
+      <p className="mt-1.5 text-right text-[10px] text-muted"><span className="font-semibold">Enter</span> to send · <span className="font-semibold">Shift + Enter</span> for a new line · <span className="font-semibold text-accent">@ai</span> to ask Common Room AI · <span className="font-semibold text-accent">@meme</span> for a meme</p>
     </form>
     <dialog ref={details} className="dialog-panel max-w-xl" aria-labelledby="details-title"><div className="flex items-center justify-between"><h2 id="details-title" className="text-base font-bold">Conversation details</h2><button aria-label="Close conversation details" className="icon-button" onClick={() => details.current?.close()}><X size={18}/></button></div>
       <h3 className="mt-4 text-xl font-bold">{p.conversation.peer.name}</h3><p className="mt-2 text-xs leading-6 text-muted">{group ? 'The group creator can add or remove people. New members only see messages sent after they join.' : 'A private direct conversation.'} Compare fingerprints with each participant through a separate, trusted channel. Messages and media are signed and encrypted in your browser. This prototype has not been independently audited and does not provide forward secrecy.</p>

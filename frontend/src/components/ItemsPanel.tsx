@@ -1,10 +1,16 @@
 import {useState,type FormEvent} from 'react';
-import {ArrowLeft,AlarmClock,ListTodo,Trash2,Plus,Sparkles,MessageSquare} from 'lucide-react';
+import {ArrowLeft,AlarmClock,ListTodo,Trash2,Plus,Sparkles,MessageSquare,CalendarDays,List} from 'lucide-react';
 import type {Item} from '../lib/types';
 import {formatDue} from './AiBits';
+import CalendarView from './CalendarView';
 type Filter='all'|'reminder'|'task';
+type View='calendar'|'list';
+const VIEW_KEY='commonroom-items-view';
+const savedView=():View=>{try{return localStorage.getItem(VIEW_KEY)==='list'?'list':'calendar';}catch{return 'calendar';}};
 // Every reminder and task, whether set by Common Room AI in any chat or added here.
-export default function ItemsPanel({items,onBack,onAdd,onToggle,onRemove,onOpenAssistant}:{items:Item[];onBack:()=>void;onAdd:(kind:'reminder'|'task',title:string,dueAt:string|null)=>Promise<void>;onToggle:(item:Item)=>Promise<void>;onRemove:(item:Item)=>Promise<void>;onOpenAssistant:()=>void}){
+export default function ItemsPanel({items,onBack,onAdd,onUpdate,onToggle,onRemove,onOpenAssistant}:{items:Item[];onBack:()=>void;onAdd:(kind:'reminder'|'task',title:string,dueAt:string|null)=>Promise<void>;onUpdate:(item:Item,changes:{title?:string;dueAt?:string|null;done?:boolean})=>Promise<void>;onToggle:(item:Item)=>Promise<void>;onRemove:(item:Item)=>Promise<void>;onOpenAssistant:()=>void}){
+  const [view,setView]=useState<View>(savedView);
+  const pickView=(next:View)=>{setView(next);try{localStorage.setItem(VIEW_KEY,next);}catch{/* private mode */}};
   const [filter,setFilter]=useState<Filter>('all'),[kind,setKind]=useState<'reminder'|'task'>('task'),[title,setTitle]=useState(''),[due,setDue]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false);
   const shown=items.filter(i=>filter==='all'||i.kind===filter);
   const now=Date.now();
@@ -30,8 +36,12 @@ export default function ItemsPanel({items,onBack,onAdd,onToggle,onRemove,onOpenA
       <div className="min-w-0 flex-1"><h2 className="truncate text-base font-bold">Reminders &amp; tasks</h2><p className="mt-0.5 text-[11px] text-muted">{open?`${open} open`:'All clear'} · set by you or by Common Room AI</p></div>
       <button className="secondary-button text-xs" onClick={onOpenAssistant}><Sparkles size={14}/>Ask AI</button>
     </header>
-    <div className="flex h-10 shrink-0 items-center gap-1 border-b border-line px-4 text-xs sm:px-6">{([['all','All'],['reminder','Reminders'],['task','Tasks']] as const).map(([value,label])=><button key={value} aria-pressed={filter===value} onClick={()=>setFilter(value)} className={`flex h-full items-center border-b-2 px-2.5 ${filter===value?'border-accent font-semibold':'border-transparent text-muted hover:text-ink'}`}>{label}</button>)}</div>
-    <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-7">
+    <div className="flex h-10 shrink-0 items-center gap-1 border-b border-line px-4 text-xs sm:px-6">{([['all','All'],['reminder','Reminders'],['task','Tasks']] as const).map(([value,label])=><button key={value} aria-pressed={filter===value} onClick={()=>setFilter(value)} className={`flex h-full items-center border-b-2 px-2.5 ${filter===value?'border-accent font-semibold':'border-transparent text-muted hover:text-ink'}`}>{label}</button>)}
+      <span className="flex-1"/>
+      <div role="group" aria-label="View" className="flex rounded-lg border border-line p-0.5">{([['calendar','Calendar',CalendarDays],['list','List',List]] as const).map(([value,label,Icon])=><button key={value} aria-pressed={view===value} onClick={()=>pickView(value)} className={`flex items-center gap-1 rounded-md px-2 py-1 ${view===value?'bg-accent-soft font-semibold text-accent':'text-muted hover:text-ink'}`}><Icon size={13}/>{label}</button>)}</div>
+    </div>
+    <div className="min-h-0 flex-1 overflow-y-auto px-3 py-5 sm:px-7">
+      {view==='calendar'?<CalendarView items={shown} onAdd={onAdd} onUpdate={onUpdate} onToggle={onToggle} onRemove={onRemove}/>:<>
       <form onSubmit={add} className="flex flex-wrap items-center gap-2 rounded-xl border border-line bg-soft p-3">
         <select aria-label="Type" value={kind} onChange={e=>setKind(e.target.value as 'reminder'|'task')} className="h-9 rounded-lg border border-line bg-panel px-2 text-xs"><option value="task">Task</option><option value="reminder">Reminder</option></select>
         <input aria-label="Title" value={title} maxLength={200} onChange={e=>setTitle(e.target.value)} placeholder={kind==='task'?'Add a task…':'Remind me to…'} className="h-9 min-w-[10rem] flex-1 rounded-lg border border-line bg-panel px-3 text-xs"/>
@@ -47,6 +57,7 @@ export default function ItemsPanel({items,onBack,onAdd,onToggle,onRemove,onOpenA
         <span className="min-w-0 flex-1"><span className={`block truncate text-[13px] font-semibold ${item.done?'text-muted line-through':''}`}>{item.title}</span><span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[10px] text-muted"><span className={!item.done&&item.dueAt&&Date.parse(item.dueAt)<now?'text-red-500':''}>{formatDue(item.dueAt)}</span>{item.conversationName&&<span className="flex items-center gap-1"><MessageSquare size={10}/>from {item.conversationName}</span>}</span></span>
         <button aria-label={`Delete “${item.title}”`} title="Delete" className="icon-button h-7 w-7 hover:text-red-500" onClick={()=>run(onRemove(item))}><Trash2 size={14}/></button>
       </li>)}</ul></div>:null)}
+      </>}
     </div>
   </section>;
 }

@@ -56,7 +56,10 @@ export function openDatabase(filename) {
     CREATE INDEX IF NOT EXISTS reports_conversation ON reports(conversation_id,resolved_at);`);
   // v7: password-wrapped backup of the device recovery secret.
   addColumn('users','key_backup','TEXT');
-  db.exec('PRAGMA user_version=7');
+  // v8: friends. One row per pair (user_a < user_b); requested_by says who asked.
+  db.exec(`CREATE TABLE IF NOT EXISTS friendships(user_a TEXT NOT NULL REFERENCES users(id),user_b TEXT NOT NULL REFERENCES users(id),requested_by TEXT NOT NULL REFERENCES users(id),status TEXT NOT NULL CHECK(status IN ('pending','accepted')),created_at TEXT NOT NULL,accepted_at TEXT,PRIMARY KEY(user_a,user_b),CHECK(user_a < user_b));
+    CREATE INDEX IF NOT EXISTS friendships_b ON friendships(user_b,status);`);
+  db.exec('PRAGMA user_version=8');
   if(db.prepare('PRAGMA foreign_key_check').all().length) throw new Error('Database migration integrity check failed.');
   return db;
 }

@@ -16,6 +16,8 @@ import { conversationFor, saveMessage, membersFor, identityInput, viewsFor, edit
 import { registerAssistant } from './assistant.js';
 import { registerModeration } from './moderation.js';
 import { registerGifs } from './gifs.js';
+import { registerMemes } from './memes.js';
+import { registerFriends, friendIdsOf, friendshipBetween } from './friends.js';
 import {MAX_GROUP_MEMBERS, MAX_ENCRYPTED_PACKET_BYTES} from '../../shared/limits.js';
 
 const credentials = z.object({username: z.string().trim().toLowerCase().regex(/^[a-z0-9_]{3,24}$/), password: z.string().min(8).max(128)});
@@ -26,7 +28,7 @@ const AVATAR_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
 const STATUSES = ['online', 'invisible', 'dnd'];
 
 
-export function createApplication({databasePath = './data/commonroom.sqlite', origins = ['http://localhost:5173'], secureCookie = false, trustProxy = false, generate = null, reminderIntervalMs, giphyKey = '', gifFetch} = {}) {
+export function createApplication({databasePath = './data/commonroom.sqlite', origins = ['http://localhost:5173'], secureCookie = false, trustProxy = false, generate = null, reminderIntervalMs, giphyKey = '', gifFetch, memeFetch} = {}) {
   const db = openDatabase(databasePath);
   const uploads = databasePath === ':memory:' ? join(tmpdir(), `commonroom-uploads-${process.pid}`) : join(dirname(databasePath), 'uploads');
   mkdirSync(uploads, {recursive: true});
@@ -56,7 +58,8 @@ export function createApplication({databasePath = './data/commonroom.sqlite', or
     if (!req.user) return res.status(401).json({error: 'Please sign in again.'});
     next();
   };
-  const contactsOf = (userId) => db.prepare('SELECT DISTINCT b.user_id AS id FROM conversation_members a JOIN conversation_members b ON b.conversation_id=a.conversation_id WHERE a.user_id=? AND b.user_id!=?').all(userId, userId).map(r => r.id);
+  // Contacts are people you share a conversation with, plus your friends.
+  const contactsOf = (userId) => [...new Set([...db.prepare('SELECT DISTINCT b.user_id AS id FROM conversation_members a JOIN conversation_members b ON b.conversation_id=a.conversation_id WHERE a.user_id=? AND b.user_id!=?').all(userId, userId).map(r => r.id), ...friendIdsOf(db, userId)])];
   const online = new Map();
   // What others see: "invisible" looks offline; Do not disturb is shown as such.
   const visibleStatus = (userId) => {
@@ -64,7 +67,7 @@ export function createApplication({databasePath = './data/commonroom.sqlite', or
     const status = db.prepare('SELECT status FROM users WHERE id=?').get(userId)?.status;
     return status === 'invisible' ? 'offline' : status === 'dnd' ? 'dnd' : 'online';
   };
-  // Presence is only shared with people who already have a conversation with you.
+  // Presence is only shared with people who already have a conversation with you, or are your friends.
   const presenceList = (userId) => contactsOf(userId).map(id => ({id, status: visibleStatus(id)})).filter(p => p.status !== 'offline');
   const sendPresence = (userId) => io.to(room(userId)).emit('presence:update', presenceList(userId));
   const announcePresence = (userId) => io.to(contactsOf(userId).map(room)).emit('presence:change', {userId, status: visibleStatus(userId)});
@@ -130,7 +133,7 @@ export function createApplication({databasePath = './data/commonroom.sqlite', or
     const user = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id);
     if (!user) return res.status(404).json({error: 'User not found.'});
     const note = db.prepare('SELECT body FROM notes WHERE owner_id=? AND target_id=?').get(req.user.id, user.id)?.body || '';
-    res.json({profile: {...publicUser(user), avatarUrl: avatarUrl(user.id, avatarVersion(user.id)), joinedAt: user.created_at, status: user.id === req.user.id ? user.status : visibleStatus(user.id), note}});
+    res.json({profile: {...publicUser(user), avatarUrl: avatarUrl(user.id, avatarVersion(user.id)), joinedAt: user.created_at, status: user.id === req.user.id ? user.status : visibleStatus(user.id), note, friendship: user.id === req.user.id ? 'self' : friendshipBetween(db, req.user.id, user.id)}});
   });
   // Private notes are visible only to their author.
   app.put('/api/notes/:userId', requireUser, (req, res) => {
@@ -380,8 +383,11 @@ export function createApplication({databasePath = './data/commonroom.sqlite', or
     });
   });
 
-  registerModeration({app, io, db, requireUser, room});
+  const friendsChanged = (ids) => ids.forEach(sendPresence);
+  registerModeration({app, io, db, requireUser, room, onFriendsChanged: friendsChanged});
+  registerFriends({app, io, db, requireUser, room, visibleStatus, onFriendsChanged: friendsChanged});
   registerGifs({app, requireUser, apiKey: giphyKey, ...(gifFetch ? {fetchImpl: gifFetch} : {})});
+  registerMemes({app, requireUser, ...(memeFetch ? {fetchImpl: memeFetch} : {})});
   const assistant = registerAssistant({app, io, db, requireUser, room, generate, reminderIntervalMs});
   app.use('/api', (_req, res) => res.status(404).json({error: 'Endpoint not found.'}));
   const dist = fileURLToPath(new URL('../../frontend/dist/', import.meta.url));

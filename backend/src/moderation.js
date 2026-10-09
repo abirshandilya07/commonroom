@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { conversationFor, membersFor } from './chat.js';
+import { removeFriendship } from './friends.js';
 
 // Moderation: anyone can block a person or report a message; a group's creator reviews its reports.
 // Messages are end-to-end encrypted, so a report only carries text the reporter chooses to include.
 export const REPORT_REASONS = ['spam', 'harassment', 'hate', 'inappropriate', 'other'];
-export function registerModeration({app, io, db, requireUser, room}) {
+export function registerModeration({app, io, db, requireUser, room, onFriendsChanged}) {
   const userExists = (id) => !!db.prepare('SELECT id FROM users WHERE id=?').get(id);
   const blocksOf = (userId) => db.prepare('SELECT blocked_id FROM blocks WHERE blocker_id=?').all(userId).map(r => r.blocked_id);
   app.get('/api/blocks', requireUser, (req, res) => res.json({blocked: blocksOf(req.user.id)}));
@@ -14,6 +15,8 @@ export function registerModeration({app, io, db, requireUser, room}) {
     if (!userExists(req.params.userId)) return res.status(404).json({error: 'User not found.'});
     db.prepare('INSERT OR IGNORE INTO blocks VALUES(?,?,?)').run(req.user.id, req.params.userId, new Date().toISOString());
     io.to(room(req.user.id)).emit('blocks:changed');
+    // Blocking ends any friendship or pending friend request between the two.
+    if (removeFriendship(db, req.user.id, req.params.userId)) {io.to([req.user.id, req.params.userId].map(room)).emit('friends:changed'); onFriendsChanged?.([req.user.id, req.params.userId]);}
     res.json({blocked: blocksOf(req.user.id)});
   });
   app.delete('/api/blocks/:userId', requireUser, (req, res) => {

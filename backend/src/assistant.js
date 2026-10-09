@@ -243,8 +243,15 @@ export function registerAssistant({app, io, db, requireUser, room, generate, rem
     res.status(201).json({item: itemView(db.prepare('SELECT * FROM ai_items WHERE id=?').get(id))});
   });
   app.patch('/api/items/:id', requireUser, (req, res) => {
-    const {done} = z.object({done: z.boolean()}).strict().parse(req.body);
-    if (!db.prepare('UPDATE ai_items SET done=? WHERE id=? AND user_id=?').run(done ? 1 : 0, req.params.id, req.user.id).changes) return res.status(404).json({error: 'Item not found.'});
+    const input = z.object({done: z.boolean().optional(), title: z.string().trim().min(1).max(200).optional(), dueAt: z.string().datetime({offset: true}).nullable().optional()}).strict().parse(req.body);
+    const item = db.prepare('SELECT * FROM ai_items WHERE id=? AND user_id=?').get(req.params.id, req.user.id);
+    if (!item) return res.status(404).json({error: 'Item not found.'});
+    const dueAt = input.dueAt === undefined ? item.due_at : validDate(input.dueAt);
+    if (item.kind === 'reminder' && !dueAt) return res.status(400).json({error: 'A reminder needs a date and time.'});
+    // A new due time means the reminder should fire again.
+    const notifiedAt = dueAt === item.due_at ? item.notified_at : null;
+    db.prepare('UPDATE ai_items SET done=?,title=?,due_at=?,notified_at=? WHERE id=?')
+      .run(input.done === undefined ? item.done : (input.done ? 1 : 0), input.title ?? item.title, dueAt, notifiedAt, item.id);
     itemsChanged(req.user.id);
     res.json({item: itemView(db.prepare('SELECT * FROM ai_items WHERE id=?').get(req.params.id))});
   });

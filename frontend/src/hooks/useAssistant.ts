@@ -44,7 +44,8 @@ export function useAssistant(socket:Socket|null,onDue:(item:Item)=>void){
   }
   async function addItem(kind:'reminder'|'task',title:string,dueAt:string|null){await post('/items',{kind,title,dueAt});await loadItems();}
   async function toggleItem(item:Item){setItems(current=>current.map(i=>i.id===item.id?{...i,done:!i.done}:i));try{await put(`/items/${item.id}`,{done:!item.done},'PATCH');}finally{await loadItems();}}
+  async function updateItem(item:Item,changes:{title?:string;dueAt?:string|null;done?:boolean}){setItems(current=>current.map(i=>i.id===item.id?{...i,...changes}:i));try{await put(`/items/${item.id}`,changes,'PATCH');}finally{await loadItems();}}
   async function removeItem(item:Item){setItems(current=>current.filter(i=>i.id!==item.id));try{await api(`/items/${item.id}`,{method:'DELETE'});}finally{await loadItems();}}
   async function clearDm(){await api('/ai/messages',{method:'DELETE'});setDm([]);}
-  return {dm,byConversation,items,thinking,configured,provider,ask,loadConversation,addItem,toggleItem,removeItem,clearDm,openCount:items.filter(i=>!i.done).length};
+  return {dm,byConversation,items,thinking,configured,provider,ask,loadConversation,addItem,updateItem,toggleItem,removeItem,clearDm,openCount:items.filter(i=>!i.done).length};
 }
